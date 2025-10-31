@@ -22,12 +22,12 @@ private:
     /**
      * @see https://github.com/rust-lang/rust/blob/8182085617878610473f0b88f07fc9803f4b4960/library/std/src/sys/fs/unix.rs#L1125-L1148
      */
-    Result<int, IoError> get_access_mode() const;
+    Result<int, IoError> _get_access_mode() const;
 
     /**
      * @see https://github.com/rust-lang/rust/blob/8182085617878610473f0b88f07fc9803f4b4960/library/std/src/sys/fs/unix.rs#L1150-L1179
      */
-    Result<int, IoError> get_creation_mode() const;
+    Result<int, IoError> _get_creation_mode() const;
 #endif
 
 public:
@@ -42,4 +42,15 @@ public:
     OpenOptions &truncate(bool truncate);
     OpenOptions &create(bool create);
     OpenOptions &create_new(bool create_new);
+};
+
+class File : public NonConstructible, public Read, public Write
+{
+private:
+    int _fd;
+
+public:
+    Result<size_t, IoError> read(std::span<char> buffer) override;
+    Result<size_t, IoError> write(std::span<const char> buffer) override;
+    Result<std::monostate, IoError> flush() override;
 };

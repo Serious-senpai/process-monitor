@@ -1,8 +1,8 @@
 #include "fs.hpp"
 
-Result<int, IoError> OpenOptions::get_access_mode() const
+Result<int, IoError> OpenOptions::_get_access_mode() const
 {
-    int modes = (int(_read) << 2) | (int(_write) << 1) | int(_append);
+    int modes = (static_cast<int>(_read) << 2) | (static_cast<int>(_write) << 1) | static_cast<int>(_append);
     switch (modes)
     {
     case 0b100:
@@ -35,9 +35,9 @@ Result<int, IoError> OpenOptions::get_access_mode() const
     }
 }
 
-Result<int, IoError> OpenOptions::get_creation_mode() const
+Result<int, IoError> OpenOptions::_get_creation_mode() const
 {
-    int modes = (int(_write) << 1) | int(_append);
+    int modes = (static_cast<int>(_write) << 1) | static_cast<int>(_append);
     switch (modes)
     {
     case 0b10:
@@ -64,7 +64,7 @@ Result<int, IoError> OpenOptions::get_creation_mode() const
         break;
     }
 
-    modes = (int(_create) << 2) | (int(_truncate) << 1) | int(_create_new);
+    modes = (static_cast<int>(_create) << 2) | (static_cast<int>(_truncate) << 1) | static_cast<int>(_create_new);
     switch (modes)
     {
     case 0b000:
@@ -78,4 +78,46 @@ Result<int, IoError> OpenOptions::get_creation_mode() const
     default:
         return Result<int, IoError>::ok(O_CREAT | O_EXCL);
     }
+}
+
+Result<size_t, IoError> File::read(std::span<char> buffer)
+{
+    if (buffer.empty())
+    {
+        return Result<size_t, IoError>::ok(0);
+    }
+
+    auto bytes = ::read(_fd, buffer.data(), buffer.size());
+    if (bytes == -1)
+    {
+        return Result<size_t, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+    }
+
+    return Result<size_t, IoError>::ok(static_cast<size_t>(bytes));
+}
+
+Result<size_t, IoError> File::write(std::span<const char> buffer)
+{
+    if (buffer.empty())
+    {
+        return Result<size_t, IoError>::ok(0);
+    }
+
+    auto bytes = ::write(_fd, buffer.data(), buffer.size());
+    if (bytes == -1)
+    {
+        return Result<size_t, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+    }
+
+    return Result<size_t, IoError>::ok(static_cast<size_t>(bytes));
+}
+
+Result<std::monostate, IoError> File::flush()
+{
+    if (::fsync(_fd) == -1)
+    {
+        return Result<std::monostate, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+    }
+
+    return Result<std::monostate, IoError>::ok(std::monostate{});
 }

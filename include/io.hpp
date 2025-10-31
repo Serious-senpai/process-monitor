@@ -2,14 +2,16 @@
 
 #include "error.hpp"
 #include "pch.hpp"
+#include "result.hpp"
 
 enum IoErrorKind
 {
-    Other,
     InvalidInput,
+    Os,
+    Other,
 };
 
-class IoError : public Error
+class IoError : public NonConstructible, public Error
 {
 private:
     IoErrorKind _kind;
@@ -20,4 +22,17 @@ public:
     static IoError other(std::string &&message);
 
     const char *message() const noexcept override;
+};
+
+class Read
+{
+public:
+    virtual Result<size_t, IoError> read(std::span<char> buffer) = 0;
+};
+
+class Write
+{
+public:
+    virtual Result<size_t, IoError> write(std::span<const char> buffer) = 0;
+    virtual Result<std::monostate, IoError> flush() = 0;
 };

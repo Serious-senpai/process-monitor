@@ -3,8 +3,14 @@
 #include "pch.hpp"
 
 template <typename T, typename E>
-class Result
+class Result : public NonConstructible
 {
+private:
+    std::variant<T, E> _data;
+
+    explicit Result(T &&value) : _data(std::move(value)), NonConstructible(NON_CONSTRUCTIBLE) {}
+    explicit Result(E &&error) : _data(std::move(error)), NonConstructible(NON_CONSTRUCTIBLE) {}
+
 public:
     using Value = T;
     using Error = E;
@@ -51,9 +57,16 @@ public:
         return std::get<E>(_data);
     }
 
-private:
-    std::variant<T, E> _data;
-
-    explicit Result(T &&value) : _data(std::move(value)) {}
-    explicit Result(E &&error) : _data(std::move(error)) {}
+    template <typename FT, typename FE>
+    std::variant<std::invoke_result_t<FT, T &>, std::invoke_result_t<FE, E &>> match(FT &&on_ok, FE &&on_err)
+    {
+        if (is_ok())
+        {
+            return std::invoke(std::forward<FT>(on_ok), std::get<T>(_data));
+        }
+        else
+        {
+            return std::invoke(std::forward<FE>(on_err), std::get<E>(_data));
+        }
+    }
 };

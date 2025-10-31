@@ -1,10 +1,7 @@
-#include <iostream>
-
-#include "result.hpp"
-#include "fs.hpp"
+#include "pch.hpp"
 
 int main()
 {
-    OpenOptions o;
+    std::cout << "Hello world!" << std::endl;
     return 0;
 }
