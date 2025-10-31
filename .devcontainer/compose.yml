@@ -1,0 +1,17 @@
+# Reference: https://docs.docker.com/reference/compose-file/
+name: process-monitor
+
+services:
+  devcontainer:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    command: bash -c "sleep infinity"
+    container_name: devcontainer
+    environment:
+      CARGO_TARGET_DIR: /target
+      RUST_BACKTRACE: "1"
+    image: ubuntu:24.04
+    volumes:
+      - ..:/workspaces/process-monitor
+    working_dir: /workspaces/process-monitor

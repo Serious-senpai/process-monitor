@@ -1,0 +1,26 @@
+{
+    "name": "devcontainer",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "github.vscode-github-actions",
+                "ms-azuretools.vscode-docker",
+                "ms-vscode.cmake-tools",
+                "ms-vscode.cpptools",
+                "ms-vscode.cpptools-extension-pack"
+            ],
+            "settings": {
+                "C_Cpp.default.cppStandard": "c++20",
+                "editor.formatOnSave": true,
+                "editor.tabSize": 4,
+                "extensions.ignoreRecommendations": false,
+                "files.insertFinalNewline": true,
+                "git.autorefresh": true,
+                "git.enabled": true
+            }
+        }
+    },
+    "dockerComposeFile": "compose.yml",
+    "service": "devcontainer",
+    "workspaceFolder": "/workspaces/process-monitor"
+}
