@@ -2,14 +2,19 @@
 
 #include "pch.hpp"
 
+/**
+ * @brief A type that represents either success or failure.
+ *
+ * @see https://doc.rust-lang.org/std/result/enum.Result.html
+ */
 template <typename T, typename E>
 class Result : public NonConstructible
 {
 private:
     std::variant<T, E> _data;
 
-    explicit Result(T &&value) : _data(std::move(value)), NonConstructible(NON_CONSTRUCTIBLE) {}
-    explicit Result(E &&error) : _data(std::move(error)), NonConstructible(NON_CONSTRUCTIBLE) {}
+    explicit Result(T &&value) : _data(std::move(value)), NonConstructible(NonConstructibleTag::TAG) {}
+    explicit Result(E &&error) : _data(std::move(error)), NonConstructible(NonConstructibleTag::TAG) {}
 
 public:
     using Value = T;

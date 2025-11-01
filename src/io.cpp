@@ -1,7 +1,7 @@
 #include "io.hpp"
 
 IoError::IoError(IoErrorKind kind, std::string &&message)
-    : _kind(kind), _message(std::move(message)), NonConstructible(NON_CONSTRUCTIBLE) {}
+    : _kind(kind), _message(std::move(message)), NonConstructible(NonConstructibleTag::TAG) {}
 
 IoError IoError::other(std::string &&message)
 {

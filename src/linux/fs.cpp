@@ -1,5 +1,6 @@
 #include "fs.hpp"
 
+/// @see https://github.com/rust-lang/rust/blob/8182085617878610473f0b88f07fc9803f4b4960/library/std/src/sys/fs/unix.rs#L1125-L1148
 Result<int, IoError> OpenOptions::_get_access_mode() const
 {
     int modes = (static_cast<int>(_read) << 2) | (static_cast<int>(_write) << 1) | static_cast<int>(_append);
@@ -35,6 +36,7 @@ Result<int, IoError> OpenOptions::_get_access_mode() const
     }
 }
 
+/// @see https://github.com/rust-lang/rust/blob/8182085617878610473f0b88f07fc9803f4b4960/library/std/src/sys/fs/unix.rs#L1150-L1179
 Result<int, IoError> OpenOptions::_get_creation_mode() const
 {
     int modes = (static_cast<int>(_write) << 1) | static_cast<int>(_append);
@@ -114,10 +116,37 @@ Result<size_t, IoError> File::write(std::span<const char> buffer)
 
 Result<std::monostate, IoError> File::flush()
 {
-    if (::fsync(_fd) == -1)
+    if (fsync(_fd) == -1)
     {
         return Result<std::monostate, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
     }
 
     return Result<std::monostate, IoError>::ok(std::monostate{});
+}
+
+Result<u_int64_t, IoError> File::seek(SeekFrom position)
+{
+    int whence;
+    switch (position.type)
+    {
+    case SeekFrom::Start:
+        whence = SEEK_SET;
+        break;
+    case SeekFrom::Current:
+        whence = SEEK_CUR;
+        break;
+    case SeekFrom::End:
+        whence = SEEK_END;
+        break;
+    default:
+        return Result<u_int64_t, IoError>::err(IoError(IoErrorKind::InvalidInput, "invalid seek type"));
+    }
+
+    auto offset = lseek(_fd, position.offset, whence);
+    if (offset == -1)
+    {
+        return Result<u_int64_t, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+    }
+
+    return Result<u_int64_t, IoError>::ok(static_cast<u_int64_t>(offset));
 }
