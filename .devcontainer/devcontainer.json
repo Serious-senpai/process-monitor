@@ -11,6 +11,12 @@
             ],
             "settings": {
                 "C_Cpp.default.cppStandard": "c++20",
+                "C_Cpp.default.includePath": [
+                    "${default}",
+                    "${workspaceFolder}/include",
+                    "${workspaceFolder}/extern/googletest/googletest/include",
+                    "${workspaceFolder}/extern/googletest/googlemock/include"
+                ],
                 "editor.formatOnSave": true,
                 "editor.tabSize": 4,
                 "extensions.ignoreRecommendations": false,

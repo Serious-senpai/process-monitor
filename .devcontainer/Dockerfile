@@ -7,4 +7,6 @@ RUN apt-get update && apt-get install -y \
     curl \
     doxygen \
     git \
-    graphviz
+    graphviz \
+    python3 \
+    python-is-python3
