@@ -26,6 +26,9 @@ public:
     bool is_ok() const noexcept { return std::holds_alternative<T>(_data); }
     bool is_err() const noexcept { return std::holds_alternative<E>(_data); }
 
+    T into_ok() && { return std::move(std::get<T>(std::move(_data))); }
+    E into_err() && { return std::move(std::get<E>(std::move(_data))); }
+
     T &unwrap()
     {
         if (!is_ok())
@@ -75,3 +78,15 @@ public:
         }
     }
 };
+
+#define SHORT_CIRCUIT(value_type, expr) ({                             \
+    auto _result = (expr);                                             \
+    if (_result.is_err())                                              \
+    {                                                                  \
+        return Result<                                                 \
+            value_type,                                                \
+            std::remove_reference_t<decltype(_result.unwrap_err())>>:: \
+            err(std::move(_result).into_err());                        \
+    }                                                                  \
+    std::move(_result).into_ok();                                      \
+})

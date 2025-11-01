@@ -4,6 +4,11 @@
 #include "pch.hpp"
 #include "result.hpp"
 
+#ifdef _WIN32
+#elif defined(__linux__)
+#include "linux/fs.hpp"
+#endif
+
 /**
  * @brief Options and flags which can be used to configure how a file is opened.
  *
@@ -12,23 +17,7 @@
 class OpenOptions
 {
 private:
-    bool _read;
-    bool _write;
-    bool _append;
-    bool _truncate;
-    bool _create;
-    bool _create_new;
-
-#ifdef _WIN32
-#elif defined(__linux__)
-
-    int _flags;
-    mode_t _mode;
-
-    Result<int, IoError> _get_access_mode() const;
-    Result<int, IoError> _get_creation_mode() const;
-
-#endif
+    _OpenOptions _inner;
 
 public:
     /**
@@ -69,6 +58,11 @@ public:
      * @brief Sets the option to create a new file, failing if it already exists.
      */
     OpenOptions &create_new(bool create_new);
+
+    /**
+     * @brief Open the file at `path` with the options specified by `this`.
+     */
+    Result<class File, IoError> open(const char *path);
 };
 
 /**
@@ -79,9 +73,17 @@ public:
 class File : public NonConstructible, public Read, public Write, public Seek
 {
 private:
-    int _fd;
+    _File _inner;
 
 public:
+    explicit File(_File &&inner);
+
+    /** @brief Attempts to open a file in read-only mode. */
+    static Result<File, IoError> open(const char *path);
+
+    /** @brief Opens a file in write-only mode. */
+    static Result<File, IoError> create(const char *path);
+
     Result<size_t, IoError> read(std::span<char> buffer) override;
     Result<size_t, IoError> write(std::span<const char> buffer) override;
     Result<std::monostate, IoError> flush() override;
