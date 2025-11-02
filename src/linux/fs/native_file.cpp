@@ -73,7 +73,7 @@ Result<std::monostate, IoError> _NativeFile::flush()
     return Result<std::monostate, IoError>::ok(std::monostate{});
 }
 
-Result<u_int64_t, IoError> _NativeFile::seek(SeekFrom position)
+Result<uint64_t, IoError> _NativeFile::seek(SeekFrom position)
 {
     int whence;
     switch (position.type)
@@ -88,14 +88,14 @@ Result<u_int64_t, IoError> _NativeFile::seek(SeekFrom position)
         whence = SEEK_END;
         break;
     default:
-        return Result<u_int64_t, IoError>::err(IoError(IoErrorKind::InvalidInput, "invalid seek type"));
+        return Result<uint64_t, IoError>::err(IoError(IoErrorKind::InvalidInput, "invalid seek type"));
     }
 
     auto offset = lseek(_fd, position.offset, whence);
     if (offset == -1)
     {
-        return Result<u_int64_t, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+        return Result<uint64_t, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
     }
 
-    return Result<u_int64_t, IoError>::ok(static_cast<u_int64_t>(offset));
+    return Result<uint64_t, IoError>::ok(static_cast<uint64_t>(offset));
 }

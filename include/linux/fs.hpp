@@ -58,5 +58,5 @@ public:
     Result<std::monostate, IoError> flush();
 
     /** @see https://github.com/rust-lang/rust/blob/8182085617878610473f0b88f07fc9803f4b4960/library/std/src/sys/fs/unix.rs#L1572-L1582 */
-    Result<u_int64_t, IoError> seek(SeekFrom position);
+    Result<uint64_t, IoError> seek(SeekFrom position);
 };

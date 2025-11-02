@@ -81,14 +81,14 @@ TEST(File, FileReadWrite)
         auto read_file = File::open("/tmp/test_file.txt");
         ASSERT_TRUE(read_file.is_ok());
 
-        char buffer[1 + strlen(data)];
-        std::span<char> read_span(buffer, sizeof(buffer));
+        std::vector<char> buffer(1 + strlen(data));
+        std::span<char> read_span(buffer.data(), sizeof(buffer));
 
         auto read_result = read_file.unwrap().read(read_span);
         ASSERT_TRUE(read_result.is_ok());
         ASSERT_EQ(read_result.unwrap(), strlen(data));
 
         buffer[read_result.unwrap()] = '\0';
-        ASSERT_STREQ(buffer, data);
+        ASSERT_STREQ(buffer.data(), data);
     }
 }

@@ -82,5 +82,5 @@ public:
 
 class Seek
 {
-    virtual Result<u_int64_t, IoError> seek(SeekFrom position) = 0;
+    virtual Result<uint64_t, IoError> seek(SeekFrom position) = 0;
 };

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <exception>
 #include <format>
 #include <functional>
@@ -9,6 +10,9 @@
 #include <variant>
 
 #ifdef _WIN32
+
+#include <windows.h>
+
 #elif defined(__linux__)
 
 #define _FILE_OFFSET_BITS 64

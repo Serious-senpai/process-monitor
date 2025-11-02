@@ -73,7 +73,7 @@ Result<std::monostate, IoError> File::flush()
     return _inner.flush();
 }
 
-Result<u_int64_t, IoError> File::seek(SeekFrom position)
+Result<uint64_t, IoError> File::seek(SeekFrom position)
 {
     return _inner.seek(position);
 }

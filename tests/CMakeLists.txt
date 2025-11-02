@@ -1,7 +1,5 @@
 file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${ROOT}/tests/*.cpp)
 
-message(STATUS "List of source files for tests: ${TEST_SOURCES}")
-
 add_executable(pm-tests ${TEST_SOURCES})
 target_compile_definitions(pm-tests PRIVATE TEST_DIR="${ROOT}/build/test_playground")
 target_include_directories(pm-tests PRIVATE "${ROOT}/include")

@@ -5,6 +5,7 @@
 #include "result.hpp"
 
 #ifdef _WIN32
+#include "win32/fs.hpp"
 #elif defined(__linux__)
 #include "linux/fs.hpp"
 #endif
@@ -101,5 +102,5 @@ public:
     Result<size_t, IoError> read(std::span<char> buffer) override;
     Result<size_t, IoError> write(std::span<const char> buffer) override;
     Result<std::monostate, IoError> flush() override;
-    Result<u_int64_t, IoError> seek(SeekFrom position) override;
+    Result<uint64_t, IoError> seek(SeekFrom position) override;
 };
