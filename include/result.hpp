@@ -13,8 +13,8 @@ class Result : public NonConstructible
 private:
     std::variant<T, E> _data;
 
-    explicit Result(T &&value) : _data(std::move(value)), NonConstructible(NonConstructibleTag::TAG) {}
-    explicit Result(E &&error) : _data(std::move(error)), NonConstructible(NonConstructibleTag::TAG) {}
+    explicit Result(T &&value) : NonConstructible(NonConstructibleTag::TAG), _data(std::move(value)) {}
+    explicit Result(E &&error) : NonConstructible(NonConstructibleTag::TAG), _data(std::move(error)) {}
 
 public:
     using Value = T;
@@ -26,8 +26,8 @@ public:
     bool is_ok() const noexcept { return std::holds_alternative<T>(_data); }
     bool is_err() const noexcept { return std::holds_alternative<E>(_data); }
 
-    T into_ok() && { return std::move(std::get<T>(std::move(_data))); }
-    E into_err() && { return std::move(std::get<E>(std::move(_data))); }
+    T into_ok() && { return std::get<T>(std::move(_data)); }
+    E into_err() && { return std::get<E>(std::move(_data)); }
 
     T &unwrap()
     {

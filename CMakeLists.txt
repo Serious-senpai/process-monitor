@@ -4,29 +4,39 @@ project(ProcessMonitorClient LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}" ROOT)
+message(STATUS "Got root of repository: ${ROOT}")
+
+file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${ROOT}/src/*.cpp")
 
 # Exclude platform-specific sources for the other OS
 if(WIN32)
-    list(FILTER SOURCES EXCLUDE REGEX ".*/src/linux/.*")
+    list(FILTER LIB_SOURCES EXCLUDE REGEX "${ROOT}/src/linux/.*")
 elseif(UNIX)
-    list(FILTER SOURCES EXCLUDE REGEX ".*/src/win32/.*")
+    list(FILTER LIB_SOURCES EXCLUDE REGEX "${ROOT}/src/win32/.*")
 else()
     message(FATAL_ERROR "Unsupported platform")
 endif()
 
-include_directories(include)
-add_executable(pm-client ${SOURCES})
+list(REMOVE_ITEM LIB_SOURCES "${ROOT}/src/main.cpp")
 
-target_precompile_headers(pm-client PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/pch.hpp>")
+message(STATUS "List of source files for library: ${LIB_SOURCES}")
+add_library(pm-lib ${LIB_SOURCES})
+target_include_directories(pm-lib PRIVATE "${ROOT}/include")
+target_precompile_headers(pm-lib PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${ROOT}/include/pch.hpp>")
+
+add_executable(pm-client "${ROOT}/src/main.cpp")
+target_include_directories(pm-client PRIVATE "${ROOT}/include")
+target_link_libraries(pm-client PRIVATE pm-lib)
+target_precompile_headers(pm-client PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${ROOT}/include/pch.hpp>")
 
 # --- Enable tests and link GoogleTest submodule ---
 enable_testing()
 
 # Verify that the submodule exists (for clarity and better error messages)
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/extern/googletest/CMakeLists.txt")
+if(NOT EXISTS "${ROOT}/extern/googletest/CMakeLists.txt")
     message(FATAL_ERROR "GoogleTest submodule not found! Run: git submodule update --init --recursive")
 endif()
 
-add_subdirectory(extern/googletest)
-add_subdirectory(tests)
+add_subdirectory("${ROOT}/extern/googletest")
+add_subdirectory("${ROOT}/tests")

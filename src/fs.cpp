@@ -38,7 +38,7 @@ OpenOptions &OpenOptions::create_new(bool create_new)
     return *this;
 }
 
-File::File(_File &&inner) : _inner(std::move(inner)), NonConstructible(NonConstructibleTag::TAG) {}
+File::File(_NativeFile &&inner) : NonConstructible(NonConstructibleTag::TAG), _inner(std::move(inner)) {}
 
 Result<class File, IoError> File::open(const char *path)
 {
@@ -50,4 +50,30 @@ Result<class File, IoError> File::create(const char *path)
 {
     OpenOptions options;
     return options.write(true).create(true).truncate(true).open(path);
+}
+
+Result<class File, IoError> File::create_new(const char *path)
+{
+    OpenOptions options;
+    return options.read(true).write(true).create_new(true).open(path);
+}
+
+Result<size_t, IoError> File::read(std::span<char> buffer)
+{
+    return _inner.read(buffer);
+}
+
+Result<size_t, IoError> File::write(std::span<const char> buffer)
+{
+    return _inner.write(buffer);
+}
+
+Result<std::monostate, IoError> File::flush()
+{
+    return _inner.flush();
+}
+
+Result<u_int64_t, IoError> File::seek(SeekFrom position)
+{
+    return _inner.seek(position);
 }

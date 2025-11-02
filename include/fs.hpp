@@ -17,7 +17,7 @@
 class OpenOptions
 {
 private:
-    _OpenOptions _inner;
+    _NativeOpenOptions _inner;
 
 public:
     /**
@@ -73,16 +73,30 @@ public:
 class File : public NonConstructible, public Read, public Write, public Seek
 {
 private:
-    _File _inner;
+    _NativeFile _inner;
 
 public:
-    explicit File(_File &&inner);
+    explicit File(_NativeFile &&inner);
 
-    /** @brief Attempts to open a file in read-only mode. */
+    /**
+     * @brief Attempts to open a file in read-only mode.
+     *
+     * @see https://github.com/rust-lang/rust/blob/8182085617878610473f0b88f07fc9803f4b4960/library/std/src/fs.rs#L532-L535
+     */
     static Result<File, IoError> open(const char *path);
 
-    /** @brief Opens a file in write-only mode. */
+    /** @brief Opens a file in write-only mode.
+     *
+     * @see https://github.com/rust-lang/rust/blob/8182085617878610473f0b88f07fc9803f4b4960/library/std/src/fs.rs#L600-L603
+     */
     static Result<File, IoError> create(const char *path);
+
+    /**
+     * @brief Creates a new file in read-write mode; error if the file exists.
+     *
+     * @see https://github.com/rust-lang/rust/blob/8182085617878610473f0b88f07fc9803f4b4960/library/std/src/fs.rs#L674-L677
+     */
+    static Result<File, IoError> create_new(const char *path);
 
     Result<size_t, IoError> read(std::span<char> buffer) override;
     Result<size_t, IoError> write(std::span<const char> buffer) override;
