@@ -10,16 +10,7 @@
                 "ms-vscode.cpptools-extension-pack"
             ],
             "settings": {
-                "C_Cpp.default.cppStandard": "c++20",
-                "C_Cpp.default.defines": [
-                    "TEST_DIR=\"${workspaceFolder}/build/test_playground\""
-                ],
-                "C_Cpp.default.includePath": [
-                    "${default}",
-                    "${workspaceFolder}/include",
-                    "${workspaceFolder}/extern/googletest/googletest/include",
-                    "${workspaceFolder}/extern/googletest/googlemock/include"
-                ],
+                "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
                 "editor.formatOnSave": true,
                 "editor.tabSize": 4,
                 "extensions.ignoreRecommendations": false,
