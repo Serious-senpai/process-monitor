@@ -1,14 +1,14 @@
 #include "fs.hpp"
 
-_NativeFile::_NativeFile(int fd) : NonConstructible(NonConstructibleTag::TAG), _fd(fd) {}
+NativeFile::NativeFile(int fd) : NonConstructible(NonConstructibleTag::TAG), _fd(fd) {}
 
-_NativeFile::_NativeFile(_NativeFile &&other) : NonConstructible(NonConstructibleTag::TAG)
+NativeFile::NativeFile(NativeFile &&other) : NonConstructible(NonConstructibleTag::TAG)
 {
     _fd = other._fd;
     other._fd = -1;
 }
 
-_NativeFile::~_NativeFile()
+NativeFile::~NativeFile()
 {
     if (_fd != -1)
     {
@@ -16,22 +16,22 @@ _NativeFile::~_NativeFile()
     }
 }
 
-Result<_NativeFile, IoError> _NativeFile::open(const char *path, const _NativeOpenOptions &options)
+Result<NativeFile, IoError> NativeFile::open(const char *path, const NativeOpenOptions &options)
 {
     int flags = O_CLOEXEC |
-                SHORT_CIRCUIT(_NativeFile, options.get_access_mode()) |
-                SHORT_CIRCUIT(_NativeFile, options.get_creation_mode()) |
+                SHORT_CIRCUIT(NativeFile, options.get_access_mode()) |
+                SHORT_CIRCUIT(NativeFile, options.get_creation_mode()) |
                 options.flags;
     int fd = ::open(path, flags, options.mode);
     if (fd == -1)
     {
-        return Result<_NativeFile, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+        return Result<NativeFile, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
     }
 
-    return Result<_NativeFile, IoError>::ok(_NativeFile(fd));
+    return Result<NativeFile, IoError>::ok(NativeFile(fd));
 }
 
-Result<size_t, IoError> _NativeFile::read(std::span<char> buffer)
+Result<size_t, IoError> NativeFile::read(std::span<char> buffer)
 {
     if (buffer.empty())
     {
@@ -47,7 +47,7 @@ Result<size_t, IoError> _NativeFile::read(std::span<char> buffer)
     return Result<size_t, IoError>::ok(static_cast<size_t>(bytes));
 }
 
-Result<size_t, IoError> _NativeFile::write(std::span<const char> buffer)
+Result<size_t, IoError> NativeFile::write(std::span<const char> buffer)
 {
     if (buffer.empty())
     {
@@ -63,7 +63,7 @@ Result<size_t, IoError> _NativeFile::write(std::span<const char> buffer)
     return Result<size_t, IoError>::ok(static_cast<size_t>(bytes));
 }
 
-Result<std::monostate, IoError> _NativeFile::flush()
+Result<std::monostate, IoError> NativeFile::flush()
 {
     if (fsync(_fd) == -1)
     {
@@ -73,7 +73,7 @@ Result<std::monostate, IoError> _NativeFile::flush()
     return Result<std::monostate, IoError>::ok(std::monostate{});
 }
 
-Result<uint64_t, IoError> _NativeFile::seek(SeekFrom position)
+Result<uint64_t, IoError> NativeFile::seek(SeekFrom position)
 {
     int whence;
     switch (position.type)

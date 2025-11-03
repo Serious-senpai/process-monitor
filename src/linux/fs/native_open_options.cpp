@@ -1,6 +1,6 @@
 #include "fs.hpp"
 
-_NativeOpenOptions::_NativeOpenOptions()
+NativeOpenOptions::NativeOpenOptions()
     : NonConstructible(NonConstructibleTag::TAG),
       read(false),
       write(false),
@@ -11,7 +11,7 @@ _NativeOpenOptions::_NativeOpenOptions()
       flags(0),
       mode(0644) {}
 
-Result<int, IoError> _NativeOpenOptions::get_access_mode() const
+Result<int, IoError> NativeOpenOptions::get_access_mode() const
 {
     int modes = (static_cast<int>(read) << 2) |
                 (static_cast<int>(write) << 1) |
@@ -48,7 +48,7 @@ Result<int, IoError> _NativeOpenOptions::get_access_mode() const
     }
 }
 
-Result<int, IoError> _NativeOpenOptions::get_creation_mode() const
+Result<int, IoError> NativeOpenOptions::get_creation_mode() const
 {
     int modes = (static_cast<int>(write) << 1) | (static_cast<int>(append) << 0);
     switch (modes)

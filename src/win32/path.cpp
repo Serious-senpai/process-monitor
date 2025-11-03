@@ -1,36 +1,36 @@
 #include "win32/path.hpp"
 
-Result<std::wstring, IoError> maybe_verbatim(const char *s)
+io::Result<std::wstring> maybe_verbatim(const char *s)
 {
     auto wstr = SHORT_CIRCUIT(std::wstring, to_widestring(s));
     return get_long_path(std::move(wstr), true);
 }
 
-Result<std::wstring, IoError> to_widestring(const char *s)
+io::Result<std::wstring> to_widestring(const char *s)
 {
     if (s == nullptr)
     {
-        return Result<std::wstring, IoError>::ok(std::wstring());
+        return io::Result<std::wstring>::ok(std::wstring());
     }
 
     int required = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
     if (required == 0)
     {
-        return Result<std::wstring, IoError>::err(
-            IoError(IoErrorKind::Os, std::format("MultiByteToWideChar: OS error {}", GetLastError())));
+        return io::Result<std::wstring>::err(
+            io::IoError(io::IoErrorKind::Os, std::format("MultiByteToWideChar: OS error {}", GetLastError())));
     }
 
     std::wstring result(required - 1, L'\0'); // exclude null terminator
     if (MultiByteToWideChar(CP_UTF8, 0, s, -1, result.data(), required) == 0)
     {
-        return Result<std::wstring, IoError>::err(
-            IoError(IoErrorKind::Os, std::format("MultiByteToWideChar: OS error {}", GetLastError())));
+        return io::Result<std::wstring>::err(
+            io::IoError(io::IoErrorKind::Os, std::format("MultiByteToWideChar: OS error {}", GetLastError())));
     }
 
-    return Result<std::wstring, IoError>::ok(std::move(result));
+    return io::Result<std::wstring>::ok(std::move(result));
 }
 
-Result<std::wstring, IoError> get_long_path(std::wstring &&path, bool prefer_verbatim)
+io::Result<std::wstring> get_long_path(std::wstring &&path, bool prefer_verbatim)
 {
     const size_t LEGACY_MAX_PATH = 248;
     const wchar_t SEP = L'\\';
@@ -46,7 +46,7 @@ Result<std::wstring, IoError> get_long_path(std::wstring &&path, bool prefer_ver
     // Early return for paths that are already verbatim or empty
     if (path.starts_with(VERBATIM_PREFIX) || path.starts_with(NT_PREFIX) || path == L"\0")
     {
-        return Result<std::wstring, IoError>::ok(std::move(path));
+        return io::Result<std::wstring>::ok(std::move(path));
     }
     else if (path.length() < LEGACY_MAX_PATH)
     {
@@ -60,12 +60,12 @@ Result<std::wstring, IoError> get_long_path(std::wstring &&path, bool prefer_ver
             {
                 if (path.length() == 2 || path[2] == SEP || path[2] == ALT_SEP)
                 {
-                    return Result<std::wstring, IoError>::ok(std::move(path));
+                    return io::Result<std::wstring>::ok(std::move(path));
                 }
             }
             else if ((first == SEP || first == ALT_SEP) && (second == SEP || second == ALT_SEP))
             {
-                return Result<std::wstring, IoError>::ok(std::move(path));
+                return io::Result<std::wstring>::ok(std::move(path));
             }
         }
     }
@@ -74,15 +74,15 @@ Result<std::wstring, IoError> get_long_path(std::wstring &&path, bool prefer_ver
     DWORD required = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
     if (required == 0)
     {
-        return Result<std::wstring, IoError>::err(
-            IoError(IoErrorKind::Os, std::format("GetFullPathNameW: OS error {}", GetLastError())));
+        return io::Result<std::wstring>::err(
+            io::IoError(io::IoErrorKind::Os, std::format("GetFullPathNameW: OS error {}", GetLastError())));
     }
 
     std::wstring absolute(required - 1, L'\0');
     if (GetFullPathNameW(path.c_str(), required, absolute.data(), nullptr) == 0)
     {
-        return Result<std::wstring, IoError>::err(
-            IoError(IoErrorKind::Os, std::format("GetFullPathNameW: OS error {}", GetLastError())));
+        return io::Result<std::wstring>::err(
+            io::IoError(io::IoErrorKind::Os, std::format("GetFullPathNameW: OS error {}", GetLastError())));
     }
 
     std::wstring result;
@@ -128,5 +128,5 @@ Result<std::wstring, IoError> get_long_path(std::wstring &&path, bool prefer_ver
     }
 
     result.append(absolute_view);
-    return Result<std::wstring, IoError>::ok(std::move(result));
+    return io::Result<std::wstring>::ok(std::move(result));
 }
