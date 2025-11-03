@@ -78,7 +78,7 @@ TEST(File, FileReadWrite)
     // File goes out of scope and closes
 
     {
-        auto read_file = File::open("/tmp/test_file.txt");
+        auto read_file = File::open(path.c_str());
         ASSERT_TRUE(read_file.is_ok());
 
         std::vector<char> buffer(1 + strlen(data));

@@ -31,6 +31,11 @@ target_include_directories(pm-client PRIVATE "${ROOT}/include")
 target_link_libraries(pm-client PRIVATE pm-lib)
 target_precompile_headers(pm-client PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${ROOT}/include/pch.hpp>")
 
+if(WIN32)
+    target_precompile_headers(pm-lib PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${ROOT}/include/win32/pch.hpp>")
+    target_precompile_headers(pm-client PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${ROOT}/include/win32/pch.hpp>")
+endif()
+
 # --- Enable tests and link GoogleTest submodule ---
 enable_testing()
 
