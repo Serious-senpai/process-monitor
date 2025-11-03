@@ -5,6 +5,11 @@ const Error *Error::source() const noexcept
     return nullptr;
 }
 
+const char *Error::what() const noexcept
+{
+    return message();
+}
+
 std::ostream &operator<<(std::ostream &os, const Error &err)
 {
     os << err.message();

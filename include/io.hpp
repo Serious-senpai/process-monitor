@@ -87,6 +87,7 @@ namespace io
 
     class Seek
     {
+    public:
         virtual Result<uint64_t> seek(SeekFrom position) = 0;
     };
 }

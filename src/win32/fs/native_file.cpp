@@ -4,13 +4,13 @@
 
 namespace _fs_impl
 {
-    io::Result<size_t> NativeFile::_synchronous_read(char *buffer, size_t len, std::optional<uint64_t> offset)
+    io::Result<size_t> NativeFile::_synchronous_read(std::span<char> buffer, std::optional<uint64_t> offset)
     {
         IO_STATUS_BLOCK io_status = {};
         io_status.Status = STATUS_PENDING;
         io_status.Information = 0;
 
-        auto bytes_to_read = static_cast<ULONG>(std::min<size_t>(len, MAXULONG32));
+        auto bytes_to_read = static_cast<ULONG>(std::min<size_t>(buffer.size(), MAXULONG32));
 
         LARGE_INTEGER bytes_offset = {};
         bytes_offset.QuadPart = offset.has_value() ? static_cast<LONGLONG>(*offset) : -1;
@@ -21,7 +21,7 @@ namespace _fs_impl
             nullptr,
             nullptr,
             &io_status,
-            buffer,
+            buffer.data(),
             bytes_to_read,
             offset.has_value() ? &bytes_offset : nullptr,
             nullptr);
@@ -51,13 +51,13 @@ namespace _fs_impl
         }
     }
 
-    io::Result<size_t> NativeFile::_synchronous_write(const char *buffer, size_t len, std::optional<uint64_t> offset)
+    io::Result<size_t> NativeFile::_synchronous_write(std::span<const char> buffer, std::optional<uint64_t> offset)
     {
         IO_STATUS_BLOCK io_status = {};
         io_status.Status = STATUS_PENDING;
         io_status.Information = 0;
 
-        auto bytes_to_read = static_cast<ULONG>(std::min<size_t>(len, MAXULONG32));
+        auto bytes_to_read = static_cast<ULONG>(std::min<size_t>(buffer.size(), MAXULONG32));
 
         LARGE_INTEGER bytes_offset = {};
         bytes_offset.QuadPart = offset.has_value() ? static_cast<LONGLONG>(*offset) : -1;
@@ -68,7 +68,7 @@ namespace _fs_impl
             nullptr,
             nullptr,
             &io_status,
-            const_cast<char *>(buffer),
+            const_cast<char *>(buffer.data()),
             bytes_to_read,
             offset.has_value() ? &bytes_offset : nullptr,
             nullptr);
@@ -100,9 +100,8 @@ namespace _fs_impl
 
     NativeFile::NativeFile(HANDLE handle) : CloseHandleGuard(handle) {}
 
-    io::Result<NativeFile> NativeFile::open(const char *path, const NativeOpenOptions &options)
+    io::Result<NativeFile> NativeFile::open(const path::PathBuf &path, const NativeOpenOptions &options)
     {
-        auto wpath = SHORT_CIRCUIT(NativeFile, to_widestring(path));
         auto creation = SHORT_CIRCUIT(NativeFile, options.get_creation_mode());
 
         SECURITY_ATTRIBUTES sa = {};
@@ -111,7 +110,7 @@ namespace _fs_impl
         sa.bInheritHandle = options.inherit_handle;
 
         auto handle = CreateFileW(
-            wpath.c_str(),
+            path.c_str(),
             SHORT_CIRCUIT(NativeFile, options.get_access_mode()),
             options.share_mode,
             options.inherit_handle ? &sa : nullptr,
@@ -145,12 +144,12 @@ namespace _fs_impl
 
     io::Result<size_t> NativeFile::read(std::span<char> buffer)
     {
-        return _synchronous_read(buffer.data(), buffer.size(), std::nullopt);
+        return _synchronous_read(buffer, std::nullopt);
     }
 
     io::Result<size_t> NativeFile::write(std::span<const char> buffer)
     {
-        return _synchronous_write(buffer.data(), buffer.size(), std::nullopt);
+        return _synchronous_write(buffer, std::nullopt);
     }
 
     io::Result<std::monostate> NativeFile::flush()

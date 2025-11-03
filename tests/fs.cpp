@@ -105,6 +105,31 @@ TEST_P(FileReadWriteTest, ReadWrite)
     }
 }
 
+std::string very_long_filepath(int length)
+{
+    std::string result;
+    result.reserve(length);
+
+    const char *segment = "long_filename_segment/";
+    auto segment_length = strlen(segment);
+
+    const char *extension = ".txt";
+    auto extension_length = strlen(extension);
+
+    while (result.size() + segment_length + extension_length < static_cast<size_t>(length))
+    {
+        result += segment;
+    }
+
+    while (result.size() + extension_length < static_cast<size_t>(length))
+    {
+        result += 'a';
+    }
+
+    result += extension;
+    return result;
+}
+
 INSTANTIATE_TEST_SUITE_P(
     FileReadWriteVariants, // test suite name
     FileReadWriteTest,     // test fixture name
@@ -112,4 +137,4 @@ INSTANTIATE_TEST_SUITE_P(
         FileReadWriteData{"FileReadWrite1.txt", "Hello World!"},
         FileReadWriteData{"FileReadWrite2.txt", "Hello Sekai!"},
         FileReadWriteData{"FileReadWrite3.txt", std::string(10000000, 'A')},
-        FileReadWriteData{std::format("FileReadWrite4-{}.txt", std::string(1000, 'A')), "This is a very long filename."}));
+        FileReadWriteData{std::format("FileReadWrite4-{}.txt", very_long_filepath(32000)), "This is a very long filename."}));

@@ -35,4 +35,6 @@ public:
      * @brief Format the error to output streams.
      */
     friend std::ostream &operator<<(std::ostream &os, const Error &err);
+
+    virtual const char *what() const noexcept override;
 };

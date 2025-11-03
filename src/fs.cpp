@@ -2,45 +2,45 @@
 
 namespace fs
 {
-    OpenOptions::OpenOptions() : _inner() {}
+    OpenOptions::OpenOptions() noexcept : _inner() {}
 
-    OpenOptions &OpenOptions::read(bool read)
+    OpenOptions &OpenOptions::read(bool read) noexcept
     {
         _inner.read = read;
         return *this;
     }
 
-    OpenOptions &OpenOptions::write(bool write)
+    OpenOptions &OpenOptions::write(bool write) noexcept
     {
         _inner.write = write;
         return *this;
     }
 
-    OpenOptions &OpenOptions::append(bool append)
+    OpenOptions &OpenOptions::append(bool append) noexcept
     {
         _inner.append = append;
         return *this;
     }
 
-    OpenOptions &OpenOptions::truncate(bool truncate)
+    OpenOptions &OpenOptions::truncate(bool truncate) noexcept
     {
         _inner.truncate = truncate;
         return *this;
     }
 
-    OpenOptions &OpenOptions::create(bool create)
+    OpenOptions &OpenOptions::create(bool create) noexcept
     {
         _inner.create = create;
         return *this;
     }
 
-    OpenOptions &OpenOptions::create_new(bool create_new)
+    OpenOptions &OpenOptions::create_new(bool create_new) noexcept
     {
         _inner.create_new = create_new;
         return *this;
     }
 
-    io::Result<File> OpenOptions::open(const char *path)
+    io::Result<File> OpenOptions::open(const path::PathBuf &path) const
     {
         auto file = SHORT_CIRCUIT(File, _fs_impl::NativeFile::open(path, _inner));
         return io::Result<File>::ok(File(std::move(file)));
@@ -48,19 +48,19 @@ namespace fs
 
     File::File(_fs_impl::NativeFile &&inner) : NonConstructible(NonConstructibleTag::TAG), _inner(std::move(inner)) {}
 
-    io::Result<File> File::open(const char *path)
+    io::Result<File> File::open(const path::PathBuf &path)
     {
         OpenOptions options;
         return options.read(true).open(path);
     }
 
-    io::Result<File> File::create(const char *path)
+    io::Result<File> File::create(const path::PathBuf &path)
     {
         OpenOptions options;
         return options.write(true).create(true).truncate(true).open(path);
     }
 
-    io::Result<File> File::create_new(const char *path)
+    io::Result<File> File::create_new(const path::PathBuf &path)
     {
         OpenOptions options;
         return options.read(true).write(true).create_new(true).open(path);
@@ -84,5 +84,50 @@ namespace fs
     io::Result<uint64_t> File::seek(io::SeekFrom position)
     {
         return _inner.seek(position);
+    }
+
+    io::Result<std::monostate> DirBuilder::_create(const path::PathBuf &path) const
+    {
+        return _recursive ? _create_dir_all(path) : _inner.mkdir(path);
+    }
+
+    io::Result<std::monostate> DirBuilder::_create_dir_all(const path::PathBuf &path) const
+    {
+        if (path.empty())
+        {
+            return io::Result<std::monostate>::ok(std::monostate{});
+        }
+
+        // TODO
+    }
+
+    DirBuilder::DirBuilder() : NonConstructible(NonConstructibleTag::TAG), _inner(), _recursive(false) {}
+
+    io::Result<std::monostate> DirBuilder::create(const path::PathBuf &path) const
+    {
+        return _create(path);
+    }
+
+    Metadata::Metadata(_fs_impl::NativeMetadata &&inner)
+        : NonConstructible(NonConstructibleTag::TAG), _inner(std::move(inner)) {}
+
+    bool Metadata::is_dir() const
+    {
+        return _inner.is_dir();
+    }
+
+    bool Metadata::is_file() const
+    {
+        return _inner.is_file();
+    }
+
+    bool Metadata::is_symlink() const
+    {
+        return _inner.is_symlink();
+    }
+
+    io::Result<std::monostate> create_dir(const path::PathBuf &path)
+    {
+        return DirBuilder().create(path);
     }
 }
