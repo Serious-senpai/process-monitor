@@ -123,6 +123,7 @@ namespace fs
 
     public:
         explicit DirBuilder();
+        DirBuilder &recursive(bool recursive) noexcept;
         io::Result<std::monostate> create(const path::PathBuf &path) const;
     };
 
@@ -144,4 +145,18 @@ namespace fs
      * @see https://doc.rust-lang.org/std/fs/fn.create_dir.html
      */
     io::Result<std::monostate> create_dir(const path::PathBuf &path);
+
+    /**
+     * @brief Recursively create a directory and all of its parent components if they are missing.
+     *
+     * @see https://doc.rust-lang.org/std/fs/fn.create_dir_all.html
+     */
+    io::Result<std::monostate> create_dir_all(const path::PathBuf &path);
+
+    /**
+     * @brief Given a path, queries the file system to get information about a file, directory, etc.
+     *
+     * @see https://doc.rust-lang.org/std/fs/fn.metadata.html
+     */
+    io::Result<Metadata> metadata(const path::PathBuf &path);
 }

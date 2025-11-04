@@ -35,6 +35,61 @@ namespace _fs_impl
         DWORD get_flags_and_attributes() const;
     };
 
+    class NativeDirBuilder : public NonConstructible
+    {
+    public:
+        explicit NativeDirBuilder();
+        io::Result<std::monostate> mkdir(const path::PathBuf &path) const;
+    };
+
+    class NativeFileType : public NonConstructible
+    {
+    private:
+        bool _is_dir;
+        bool _is_symlink;
+
+    public:
+        explicit NativeFileType(DWORD attributes, DWORD reparse_tag);
+
+        bool is_dir() const;
+        bool is_file() const;
+        bool is_symlink() const;
+        bool is_symlink_dir() const;
+        bool is_symlink_file() const;
+    };
+
+    class NativeMetadata : public NonConstructible
+    {
+    public:
+        DWORD attributes;
+        FILETIME creation_time;
+        FILETIME last_access_time;
+        FILETIME last_write_time;
+        std::optional<FILETIME> change_time;
+        uint64_t file_size;
+        DWORD reparse_tag;
+        DWORD volume_serial_number;
+        DWORD number_of_links;
+        uint64_t file_index;
+
+        explicit NativeMetadata(
+            DWORD attributes,
+            FILETIME creation_time,
+            FILETIME last_access_time,
+            FILETIME last_write_time,
+            std::optional<FILETIME> change_time,
+            uint64_t file_size,
+            DWORD reparse_tag,
+            DWORD volume_serial_number,
+            DWORD number_of_links,
+            uint64_t file_index);
+
+        NativeFileType file_type() const;
+        bool is_dir() const;
+        bool is_file() const;
+        bool is_symlink() const;
+    };
+
     /** @brief Documentation for native implementation should not be used for reference. */
     class NativeFile : public CloseHandleGuard
     {
@@ -62,24 +117,9 @@ namespace _fs_impl
 
         /** @see https://github.com/rust-lang/rust/blob/8182085617878610473f0b88f07fc9803f4b4960/library/std/src/sys/fs/windows.rs#L633-L645 */
         io::Result<uint64_t> seek(io::SeekFrom position);
+
+        io::Result<NativeMetadata> metadata();
     };
 
-    class NativeDirBuilder : public NonConstructible
-    {
-    public:
-        explicit NativeDirBuilder();
-        io::Result<std::monostate> mkdir(const path::PathBuf &path) const;
-    };
-
-    class NativeMetadata : public NonConstructible
-    {
-    private:
-        WIN32_FIND_DATAW _data;
-
-    public:
-        explicit NativeMetadata(WIN32_FIND_DATAW &&data);
-        bool is_dir() const;
-        bool is_file() const;
-        bool is_symlink() const;
-    };
+    io::Result<NativeMetadata> metadata(const path::PathBuf &path);
 }

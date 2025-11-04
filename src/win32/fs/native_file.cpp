@@ -102,6 +102,7 @@ namespace _fs_impl
 
     io::Result<NativeFile> NativeFile::open(const path::PathBuf &path, const NativeOpenOptions &options)
     {
+        auto verbatim = get_long_path(path::PathBuf(path), true);
         auto creation = SHORT_CIRCUIT(NativeFile, options.get_creation_mode());
 
         SECURITY_ATTRIBUTES sa = {};
@@ -110,7 +111,7 @@ namespace _fs_impl
         sa.bInheritHandle = options.inherit_handle;
 
         auto handle = CreateFileW(
-            path.c_str(),
+            verbatim.is_ok() ? verbatim.unwrap().c_str() : path.c_str(),
             SHORT_CIRCUIT(NativeFile, options.get_access_mode()),
             options.share_mode,
             options.inherit_handle ? &sa : nullptr,
@@ -132,11 +133,7 @@ namespace _fs_impl
             FILE_ALLOCATION_INFO alloc = {};
             alloc.AllocationSize = LARGE_INTEGER{0};
 
-            if (SetFileInformationByHandle(handle, FileAllocationInfo, &alloc, sizeof(FILE_ALLOCATION_INFO)) == 0)
-            {
-                return io::Result<NativeFile>::err(
-                    io::IoError(io::IoErrorKind::Os, std::format("SetFileInformationByHandle: OS error {}", GetLastError())));
-            }
+            OS_CVT(NativeFile, SetFileInformationByHandle(handle, FileAllocationInfo, &alloc, sizeof(FILE_ALLOCATION_INFO)));
         }
 
         return io::Result<NativeFile>::ok(NativeFile(std::move(guard).into_handle()));
@@ -179,8 +176,39 @@ namespace _fs_impl
         pos.QuadPart = position.offset;
 
         LARGE_INTEGER new_pos = {};
-        SetFilePointerEx(_handle, pos, reinterpret_cast<PLARGE_INTEGER>(&new_pos), whence);
+        OS_CVT(uint64_t, SetFilePointerEx(_handle, pos, reinterpret_cast<PLARGE_INTEGER>(&new_pos), whence));
 
         return io::Result<uint64_t>::ok(static_cast<uint64_t>(new_pos.QuadPart));
+    }
+
+    io::Result<NativeMetadata> NativeFile::metadata()
+    {
+        BY_HANDLE_FILE_INFORMATION info = {};
+        OS_CVT(NativeMetadata, GetFileInformationByHandle(_handle, &info));
+
+        DWORD reparse = 0;
+        if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+        {
+            FILE_ATTRIBUTE_TAG_INFO tag_info = {};
+            OS_CVT(NativeMetadata, GetFileInformationByHandleEx(_handle, FileAttributeTagInfo, &tag_info, sizeof(FILE_ATTRIBUTE_TAG_INFO)));
+
+            if (tag_info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+            {
+                reparse = tag_info.ReparseTag;
+            }
+        }
+
+        return io::Result<NativeMetadata>::ok(
+            NativeMetadata(
+                info.dwFileAttributes,
+                info.ftCreationTime,
+                info.ftLastAccessTime,
+                info.ftLastWriteTime,
+                std::nullopt,
+                (static_cast<uint64_t>(info.nFileSizeHigh) << 32) | static_cast<uint64_t>(info.nFileSizeLow),
+                reparse,
+                info.dwVolumeSerialNumber,
+                info.nNumberOfLinks,
+                (static_cast<uint64_t>(info.nFileIndexHigh) << 32) | static_cast<uint64_t>(info.nFileIndexLow)));
     }
 }

@@ -22,103 +22,135 @@ io::Result<std::wstring> to_widestring(const std::string &s)
 
 io::Result<path::PathBuf> get_long_path(path::PathBuf &&path, bool prefer_verbatim)
 {
-    static const size_t LEGACY_MAX_PATH = 248;
-    static const wchar_t SEP = L'\\';
-    static const wchar_t ALT_SEP = L'/';
-    static const wchar_t QUERY = L'?';
-    static const wchar_t COLON = L':';
-    static const wchar_t DOT = L'.';
+    // Normally the MAX_PATH is 260 UTF-16 code units (including the NULL).
+    // However, for APIs such as CreateDirectory[1], the limit is 248.
+    //
+    // [1]: https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createdirectorya#parameters
+    constexpr size_t LEGACY_MAX_PATH = 248;
 
-    static const std::wstring_view VERBATIM_PREFIX = L"\\\\?\\";
-    static const std::wstring_view NT_PREFIX = L"\\??\\";
-    static const std::wstring_view UNC_PREFIX = L"\\\\?\\UNC\\";
+    // UTF-16 encoded code points, used in parsing and building UTF-16 paths.
+    // All of these are in the ASCII range so they can be cast directly to `u16`.
+    constexpr wchar_t SEP = L'\\';
+    constexpr wchar_t ALT_SEP = L'/';
+    constexpr wchar_t QUERY = L'?';
+    constexpr wchar_t COLON = L':';
+    constexpr wchar_t DOT = L'.';
+    constexpr wchar_t U = L'U';
+    constexpr wchar_t N = L'N';
+    constexpr wchar_t C = L'C';
 
-    const std::wstring &path_str = path.native();
+    const std::wstring VERBATIM_PREFIX = L"\\\\?\\";
+    const std::wstring NT_PREFIX = L"\\??\\";
+    const std::wstring UNC_PREFIX = L"\\\\?\\UNC\\";
 
-    // Early return for paths that are already verbatim or empty
-    if (path_str.starts_with(VERBATIM_PREFIX) || path_str.starts_with(NT_PREFIX) || path_str == L"\0")
+    std::wstring path_str = path.wstring();
+
+    // Early return for paths that are already verbatim or empty.
+    if (path_str.starts_with(VERBATIM_PREFIX) ||
+        path_str.starts_with(NT_PREFIX) ||
+        path_str == L"\0")
     {
-        return io::Result<path::PathBuf>::ok(std::move(path_str));
+        return io::Result<path::PathBuf>::ok(std::move(path));
     }
     else if (path_str.length() < LEGACY_MAX_PATH)
     {
-        // Early return optimization for short absolute paths
+        // Early return if an absolute path is < 260 UTF-16 code units.
+        // This is an optimization to avoid calling `GetFullPathNameW` unnecessarily.
         if (path_str.length() >= 2)
         {
             wchar_t first = path_str[0];
             wchar_t second = path_str[1];
 
+            // Starts with `D:`, `D:\`, `D:/`, etc.
+            // Does not match if the path starts with a `\` or `/`.
             if (second == COLON && first != SEP && first != ALT_SEP)
             {
-                if (path_str.length() == 2 || path_str[2] == SEP || path_str[2] == ALT_SEP)
+                if (path_str.length() == 2 ||
+                    path_str[2] == SEP ||
+                    path_str[2] == ALT_SEP)
                 {
-                    return io::Result<path::PathBuf>::ok(std::move(path_str));
+                    return io::Result<path::PathBuf>::ok(std::move(path));
                 }
             }
-            else if ((first == SEP || first == ALT_SEP) && (second == SEP || second == ALT_SEP))
+
+            // Starts with `\\`, `//`, etc
+            if ((first == SEP || first == ALT_SEP) &&
+                (second == SEP || second == ALT_SEP))
             {
-                return io::Result<path::PathBuf>::ok(std::move(path_str));
+                return io::Result<path::PathBuf>::ok(std::move(path));
             }
         }
     }
 
-    // Get absolute path using GetFullPathNameW
-    DWORD required = GetFullPathNameW(path_str.c_str(), 0, nullptr, nullptr);
-    if (required == 0)
+    // Firstly, get the absolute path using `GetFullPathNameW`.
+    // https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfullpathnamew
+    DWORD buffer_size = GetFullPathNameW(path_str.c_str(), 0, nullptr, nullptr);
+    if (buffer_size == 0)
     {
-        return io::Result<path::PathBuf>::err(
-            io::IoError(io::IoErrorKind::Os, std::format("GetFullPathNameW: OS error {}", GetLastError())));
+        return io::Result<path::PathBuf>::err(io::IoError(io::IoErrorKind::Os, std::format("OS error {}", GetLastError())));
     }
 
-    std::wstring absolute(required - 1, L'\0');
-    if (GetFullPathNameW(path.c_str(), required, absolute.data(), nullptr) == 0)
+    std::vector<wchar_t> buffer(buffer_size);
+    DWORD result = GetFullPathNameW(path_str.c_str(), buffer_size, buffer.data(), nullptr);
+    if (result == 0 || result >= buffer_size)
     {
-        return io::Result<path::PathBuf>::err(
-            io::IoError(io::IoErrorKind::Os, std::format("GetFullPathNameW: OS error {}", GetLastError())));
+        return io::Result<path::PathBuf>::err(io::IoError(io::IoErrorKind::Os, std::format("OS error {}", GetLastError())));
     }
 
-    std::wstring result;
-    std::wstring_view absolute_view = absolute;
+    // Convert buffer to wstring (excluding null terminator)
+    std::wstring absolute(buffer.data(), result);
+    std::wstring final_path;
 
-    // Only prepend prefix if needed
+    // Only prepend the prefix if needed.
     if (prefer_verbatim || absolute.length() + 1 >= LEGACY_MAX_PATH)
     {
+        // Secondly, add the verbatim prefix. This is easier here because we know the
+        // path is now absolute and fully normalized (e.g. `/` has been changed to `\`).
+
+        std::wstring_view absolute_view = absolute;
         std::wstring_view prefix;
 
         if (absolute.length() >= 3 && absolute[1] == COLON && absolute[2] == SEP)
         {
-            // C:\ => \\?\C:\
-                prefix = VERBATIM_PREFIX;
-        }
-        else if (absolute.length() >= 4 && absolute[0] == SEP && absolute[1] == SEP &&
-                 absolute[2] == DOT && absolute[3] == SEP)
-        {
-            // \\.\ => \\?\
-                absolute_view = absolute_view.substr(4);
             prefix = VERBATIM_PREFIX;
         }
-        else if (absolute.length() >= 4 && absolute[0] == SEP &&
-                 ((absolute[1] == SEP && absolute[2] == QUERY && absolute[3] == SEP) ||
-                  (absolute[1] == QUERY && absolute[2] == QUERY && absolute[3] == SEP)))
+        else if (absolute.length() >= 4 &&
+                 absolute[0] == SEP && absolute[1] == SEP &&
+                 absolute[2] == DOT && absolute[3] == SEP)
         {
-            // Leave \\?\ and \??\ as-is
+            absolute_view = absolute_view.substr(4);
+            prefix = VERBATIM_PREFIX;
+        }
+        else if (absolute.length() >= 4 &&
+                 ((absolute[0] == SEP && absolute[1] == SEP &&
+                   absolute[2] == QUERY && absolute[3] == SEP) ||
+                  (absolute[0] == SEP && absolute[1] == QUERY &&
+                   absolute[2] == QUERY && absolute[3] == SEP)))
+        {
+            // Leave \\?\ and \??\ as-is.
             prefix = L"";
         }
-        else if (absolute.length() >= 2 && absolute[0] == SEP && absolute[1] == SEP)
+        else if (absolute.length() >= 2 &&
+                 absolute[0] == SEP && absolute[1] == SEP)
         {
-            // \\ => \\?\UNC\
-                absolute_view = absolute_view.substr(2);
+            absolute_view = absolute_view.substr(2);
             prefix = UNC_PREFIX;
         }
+        else
+        {
+            // Anything else we leave alone.
+            prefix = L"";
+        }
 
-        result.reserve(prefix.length() + absolute_view.length());
-        result.append(prefix);
+        final_path.reserve(prefix.length() + absolute_view.length() + 1);
+        final_path.append(prefix);
+        final_path.append(absolute_view);
     }
     else
     {
-        result.reserve(absolute_view.length());
+        final_path.reserve(absolute.length() + 1);
+        final_path = absolute;
     }
 
-    result.append(absolute_view);
-    return io::Result<path::PathBuf>::ok(std::move(result));
+    return io::Result<path::PathBuf>::ok(final_path);
 }

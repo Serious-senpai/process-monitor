@@ -3,9 +3,10 @@
 #include <gtest/gtest.h>
 
 #include "fs.hpp"
+#include "path.hpp"
 #include "process.hpp"
 
-const std::string BASE_TEST_DIR = std::format("{}/{}", TEST_DIR, process::id());
+const path::PathBuf BASE_TEST_DIR = std::format("{}/{}", TEST_DIR, process::id());
 
 // Define a global test environment that sets up and tears down once.
 class TestEnvironment : public testing::Environment
@@ -56,10 +57,10 @@ testing::Environment *const test_env = testing::AddGlobalTestEnvironment(new Tes
 class FileReadWriteData
 {
 public:
-    std::string filename;
+    path::PathBuf filename;
     std::string data;
 
-    FileReadWriteData(std::string &&filename, std::string &&data)
+    FileReadWriteData(path::PathBuf &&filename, std::string &&data)
         : filename(filename), data(data) {}
 };
 
@@ -71,7 +72,15 @@ TEST_P(FileReadWriteTest, ReadWrite)
 {
     const auto &param = GetParam();
 
-    std::string path(std::format("{}/{}", BASE_TEST_DIR, param.filename));
+    auto path = BASE_TEST_DIR / param.filename;
+    std::cout << "Testing file at " << path << std::endl;
+
+    auto mkdir = fs::create_dir_all(path.parent_path());
+    if (!mkdir.is_ok())
+    {
+        std::cout << "Warning: Failed to create parent directories: " << std::move(mkdir).into_err().message() << std::endl;
+    }
+
     const char *data = param.data.c_str();
 
     {
@@ -105,28 +114,15 @@ TEST_P(FileReadWriteTest, ReadWrite)
     }
 }
 
-std::string very_long_filepath(int length)
+path::PathBuf very_long_filepath(int subdir_length, int levels)
 {
-    std::string result;
-    result.reserve(length);
-
-    const char *segment = "long_filename_segment/";
-    auto segment_length = strlen(segment);
-
-    const char *extension = ".txt";
-    auto extension_length = strlen(extension);
-
-    while (result.size() + segment_length + extension_length < static_cast<size_t>(length))
+    path::PathBuf result = "FileReadWrite4";
+    for (int i = 0; i < levels; ++i)
     {
-        result += segment;
+        result /= std::string(subdir_length, 'a' + (i % 26));
     }
 
-    while (result.size() + extension_length < static_cast<size_t>(length))
-    {
-        result += 'a';
-    }
-
-    result += extension;
+    result += ".txt";
     return result;
 }
 
@@ -137,4 +133,4 @@ INSTANTIATE_TEST_SUITE_P(
         FileReadWriteData{"FileReadWrite1.txt", "Hello World!"},
         FileReadWriteData{"FileReadWrite2.txt", "Hello Sekai!"},
         FileReadWriteData{"FileReadWrite3.txt", std::string(10000000, 'A')},
-        FileReadWriteData{std::format("FileReadWrite4-{}.txt", very_long_filepath(32000)), "This is a very long filename."}));
+        FileReadWriteData{very_long_filepath(150, 200), "This is a very long filename."}));

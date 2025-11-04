@@ -1,5 +1,6 @@
 #include "fs.hpp"
 #include "win32/path.hpp"
+#include "win32/pch.hpp"
 
 namespace _fs_impl
 {
@@ -7,15 +8,12 @@ namespace _fs_impl
 
     io::Result<std::monostate> NativeDirBuilder::mkdir(const path::PathBuf &path) const
     {
-        if (CreateDirectoryW(path.c_str(), nullptr))
-        {
-            return io::Result<std::monostate>::ok(std::monostate{});
-        }
-        else
-        {
-            DWORD error = GetLastError();
-            return io::Result<std::monostate>::err(
-                io::IoError(io::IoErrorKind::Os, std::format("CreateDirectoryW: OS error {}", error)));
-        }
+        auto verbatim = get_long_path(path::PathBuf(path), true);
+        OS_CVT(
+            std::monostate,
+            CreateDirectoryW(
+                verbatim.is_ok() ? verbatim.unwrap().c_str() : path.c_str(),
+                nullptr));
+        return io::Result<std::monostate>::ok(std::monostate{});
     }
 }

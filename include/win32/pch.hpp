@@ -45,3 +45,11 @@ const PFRtlNtStatusToDosError RtlNtStatusToDosError =
     reinterpret_cast<PFRtlNtStatusToDosError>(GetProcAddress(ntdll, "RtlNtStatusToDosError"));
 
 #define NT_SUCCESS(status) (static_cast<NTSTATUS>(status) >= 0)
+
+#define OS_CVT(value_type, expr)                                                                                              \
+    {                                                                                                                         \
+        if ((expr) == 0)                                                                                                      \
+        {                                                                                                                     \
+            return io::Result<value_type>::err(io::IoError(io::IoErrorKind::Os, std::format("OS error {}", GetLastError()))); \
+        }                                                                                                                     \
+    }

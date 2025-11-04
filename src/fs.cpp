@@ -98,10 +98,35 @@ namespace fs
             return io::Result<std::monostate>::ok(std::monostate{});
         }
 
-        // TODO
+        auto result = _inner.mkdir(path);
+        if (result.is_ok())
+        {
+            return result;
+        }
+
+        auto m = metadata(path);
+        if (m.is_ok() && m.unwrap().is_dir())
+        {
+            return io::Result<std::monostate>::ok(std::monostate{});
+        }
+
+        auto parent = path.parent_path();
+        if (parent.empty() || parent == path)
+        {
+            return io::Result<std::monostate>::err(io::IoError(io::IoErrorKind::Other, "Failed to create whole directory tree"));
+        }
+
+        SHORT_CIRCUIT(std::monostate, _create_dir_all(parent));
+        return _inner.mkdir(path);
     }
 
     DirBuilder::DirBuilder() : NonConstructible(NonConstructibleTag::TAG), _inner(), _recursive(false) {}
+
+    DirBuilder &DirBuilder::recursive(bool recursive) noexcept
+    {
+        _recursive = recursive;
+        return *this;
+    }
 
     io::Result<std::monostate> DirBuilder::create(const path::PathBuf &path) const
     {
@@ -129,5 +154,16 @@ namespace fs
     io::Result<std::monostate> create_dir(const path::PathBuf &path)
     {
         return DirBuilder().create(path);
+    }
+
+    io::Result<std::monostate> create_dir_all(const path::PathBuf &path)
+    {
+        return DirBuilder().recursive(true).create(path);
+    }
+
+    io::Result<Metadata> metadata(const path::PathBuf &path)
+    {
+        auto metadata = SHORT_CIRCUIT(Metadata, _fs_impl::metadata(path));
+        return io::Result<Metadata>::ok(Metadata(std::move(metadata)));
     }
 }
