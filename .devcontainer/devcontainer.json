@@ -11,6 +11,9 @@
             ],
             "settings": {
                 "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+                "C_Cpp.files.exclude": {
+                    "**/win32/**": true
+                },
                 "editor.formatOnSave": true,
                 "editor.tabSize": 4,
                 "extensions.ignoreRecommendations": false,

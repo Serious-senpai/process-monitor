@@ -1,101 +1,104 @@
 #include "fs.hpp"
 
-NativeFile::NativeFile(int fd) : NonConstructible(NonConstructibleTag::TAG), _fd(fd) {}
-
-NativeFile::NativeFile(NativeFile &&other) : NonConstructible(NonConstructibleTag::TAG)
+namespace _fs_impl
 {
-    _fd = other._fd;
-    other._fd = -1;
-}
+    NativeFile::NativeFile(int fd) : NonConstructible(NonConstructibleTag::TAG), _fd(fd) {}
 
-NativeFile::~NativeFile()
-{
-    if (_fd != -1)
+    NativeFile::NativeFile(NativeFile &&other) : NonConstructible(NonConstructibleTag::TAG)
     {
-        close(_fd);
-    }
-}
-
-Result<NativeFile, IoError> NativeFile::open(const char *path, const NativeOpenOptions &options)
-{
-    int flags = O_CLOEXEC |
-                SHORT_CIRCUIT(NativeFile, options.get_access_mode()) |
-                SHORT_CIRCUIT(NativeFile, options.get_creation_mode()) |
-                options.flags;
-    int fd = ::open(path, flags, options.mode);
-    if (fd == -1)
-    {
-        return Result<NativeFile, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+        _fd = other._fd;
+        other._fd = -1;
     }
 
-    return Result<NativeFile, IoError>::ok(NativeFile(fd));
-}
-
-Result<size_t, IoError> NativeFile::read(std::span<char> buffer)
-{
-    if (buffer.empty())
+    NativeFile::~NativeFile()
     {
-        return Result<size_t, IoError>::ok(0);
+        if (_fd != -1)
+        {
+            close(_fd);
+        }
     }
 
-    auto bytes = ::read(_fd, buffer.data(), buffer.size());
-    if (bytes == -1)
+    io::Result<NativeFile> NativeFile::open(const path::PathBuf &path, const NativeOpenOptions &options)
     {
-        return Result<size_t, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+        int flags = O_CLOEXEC |
+                    SHORT_CIRCUIT(NativeFile, options.get_access_mode()) |
+                    SHORT_CIRCUIT(NativeFile, options.get_creation_mode()) |
+                    options.flags;
+        int fd = ::open(path.c_str(), flags, options.mode);
+        if (fd == -1)
+        {
+            return io::Result<NativeFile>::err(io::IoError(io::IoErrorKind::Os, std::format("OS error %d", errno)));
+        }
+
+        return io::Result<NativeFile>::ok(NativeFile(fd));
     }
 
-    return Result<size_t, IoError>::ok(static_cast<size_t>(bytes));
-}
-
-Result<size_t, IoError> NativeFile::write(std::span<const char> buffer)
-{
-    if (buffer.empty())
+    io::Result<size_t> NativeFile::read(std::span<char> buffer)
     {
-        return Result<size_t, IoError>::ok(0);
+        if (buffer.empty())
+        {
+            return io::Result<size_t>::ok(0);
+        }
+
+        auto bytes = ::read(_fd, buffer.data(), buffer.size());
+        if (bytes == -1)
+        {
+            return io::Result<size_t>::err(io::IoError(io::IoErrorKind::Os, std::format("OS error %d", errno)));
+        }
+
+        return io::Result<size_t>::ok(static_cast<size_t>(bytes));
     }
 
-    auto bytes = ::write(_fd, buffer.data(), buffer.size());
-    if (bytes == -1)
+    io::Result<size_t> NativeFile::write(std::span<const char> buffer)
     {
-        return Result<size_t, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+        if (buffer.empty())
+        {
+            return io::Result<size_t>::ok(0);
+        }
+
+        auto bytes = ::write(_fd, buffer.data(), buffer.size());
+        if (bytes == -1)
+        {
+            return io::Result<size_t>::err(io::IoError(io::IoErrorKind::Os, std::format("OS error %d", errno)));
+        }
+
+        return io::Result<size_t>::ok(static_cast<size_t>(bytes));
     }
 
-    return Result<size_t, IoError>::ok(static_cast<size_t>(bytes));
-}
-
-Result<std::monostate, IoError> NativeFile::flush()
-{
-    if (fsync(_fd) == -1)
+    io::Result<std::monostate> NativeFile::flush()
     {
-        return Result<std::monostate, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
+        if (fsync(_fd) == -1)
+        {
+            return io::Result<std::monostate>::err(io::IoError(io::IoErrorKind::Os, std::format("OS error %d", errno)));
+        }
+
+        return io::Result<std::monostate>::ok(std::monostate{});
     }
 
-    return Result<std::monostate, IoError>::ok(std::monostate{});
-}
-
-Result<uint64_t, IoError> NativeFile::seek(SeekFrom position)
-{
-    int whence;
-    switch (position.type)
+    io::Result<uint64_t> NativeFile::seek(io::SeekFrom position)
     {
-    case SeekFrom::Start:
-        whence = SEEK_SET;
-        break;
-    case SeekFrom::Current:
-        whence = SEEK_CUR;
-        break;
-    case SeekFrom::End:
-        whence = SEEK_END;
-        break;
-    default:
-        return Result<uint64_t, IoError>::err(IoError(IoErrorKind::InvalidInput, "invalid seek type"));
-    }
+        int whence;
+        switch (position.type)
+        {
+        case io::SeekFrom::Start:
+            whence = SEEK_SET;
+            break;
+        case io::SeekFrom::Current:
+            whence = SEEK_CUR;
+            break;
+        case io::SeekFrom::End:
+            whence = SEEK_END;
+            break;
+        default:
+            return io::Result<uint64_t>::err(io::IoError(io::IoErrorKind::InvalidInput, "invalid seek type"));
+        }
 
-    auto offset = lseek(_fd, position.offset, whence);
-    if (offset == -1)
-    {
-        return Result<uint64_t, IoError>::err(IoError(IoErrorKind::Os, std::format("OS error %d", errno)));
-    }
+        auto offset = lseek(_fd, position.offset, whence);
+        if (offset == -1)
+        {
+            return io::Result<uint64_t>::err(io::IoError(io::IoErrorKind::Os, std::format("OS error %d", errno)));
+        }
 
-    return Result<uint64_t, IoError>::ok(static_cast<uint64_t>(offset));
+        return io::Result<uint64_t>::ok(static_cast<uint64_t>(offset));
+    }
 }

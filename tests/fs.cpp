@@ -116,7 +116,7 @@ TEST_P(FileReadWriteTest, ReadWrite)
 
 path::PathBuf very_long_filepath(int subdir_length, int levels)
 {
-    path::PathBuf result = "FileReadWrite4";
+    path::PathBuf result = "FileReadWrite45";
     for (int i = 0; i < levels; ++i)
     {
         result /= std::string(subdir_length, 'a' + (i % 26));
@@ -133,4 +133,8 @@ INSTANTIATE_TEST_SUITE_P(
         FileReadWriteData{"FileReadWrite1.txt", "Hello World!"},
         FileReadWriteData{"FileReadWrite2.txt", "Hello Sekai!"},
         FileReadWriteData{"FileReadWrite3.txt", std::string(10000000, 'A')},
-        FileReadWriteData{very_long_filepath(150, 200), "This is a very long filename."}));
+#ifdef WIN32
+        // Linux has a smaller MAX_PATH limit, so we skip these tests there.
+        FileReadWriteData{very_long_filepath(150, 200), "This is a very long filename."},
+#endif
+        FileReadWriteData{very_long_filepath(15, 200), "This is a very long filename."}));

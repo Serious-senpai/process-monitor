@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -21,6 +22,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #endif
