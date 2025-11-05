@@ -1,7 +1,7 @@
-#include "pch.hpp"
+#include "fs.hpp"
 
 int main()
 {
-    std::cout << "Hello world!" << std::endl;
+    auto file = fs::File::create("example.txt");
     return 0;
 }
