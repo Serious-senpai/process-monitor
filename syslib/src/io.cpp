@@ -2,15 +2,20 @@
 
 namespace io
 {
-    IoError::IoError(IoErrorKind kind, std::string &&message)
+    Error::Error(ErrorKind kind, std::string &&message)
         : _kind(kind), _message(std::move(message)), NonConstructible(NonConstructibleTag::TAG) {}
 
-    IoError IoError::other(std::string &&message)
+    Error Error::other(std::string &&message)
     {
-        return IoError(IoErrorKind::Other, std::move(message));
+        return Error(ErrorKind::Other, std::move(message));
     }
 
-    const char *IoError::message() const noexcept
+    Error Error::from_raw_os_error(int code)
+    {
+        // TODO
+    }
+
+    const char *Error::message() const noexcept
     {
         return _message.c_str();
     }

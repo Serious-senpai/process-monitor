@@ -113,7 +113,7 @@ namespace fs
         auto parent = path.parent_path();
         if (parent.empty() || parent == path)
         {
-            return io::Result<std::monostate>::err(io::IoError(io::IoErrorKind::Other, "Failed to create whole directory tree"));
+            return io::Result<std::monostate>::err(io::Error(io::ErrorKind::Other, "Failed to create whole directory tree"));
         }
 
         SHORT_CIRCUIT(std::monostate, _create_dir_all(parent));

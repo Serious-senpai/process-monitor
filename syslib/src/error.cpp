@@ -1,22 +1,25 @@
 #include "error.hpp"
 
-const Error *Error::source() const noexcept
+namespace error
 {
-    return nullptr;
-}
-
-const char *Error::what() const noexcept
-{
-    return message();
-}
-
-std::ostream &operator<<(std::ostream &os, const Error &err)
-{
-    os << err.message();
-    const Error *src = err.source();
-    if (src)
+    const Error *Error::source() const noexcept
     {
-        os << " [caused by: " << *src << "]";
+        return nullptr;
     }
-    return os;
+
+    const char *Error::what() const noexcept
+    {
+        return message();
+    }
+
+    std::ostream &operator<<(std::ostream &os, const Error &err)
+    {
+        os << err.message();
+        const Error *src = err.source();
+        if (src)
+        {
+            os << " [caused by: " << *src << "]";
+        }
+        return os;
+    }
 }

@@ -45,15 +45,15 @@ namespace _fs_impl
             if (create || create_new || truncate)
             {
                 return io::Result<DWORD>::err(
-                    io::IoError(
-                        io::IoErrorKind::InvalidInput,
+                    io::Error(
+                        io::ErrorKind::InvalidInput,
                         "creating or truncating a file requires write or append access"));
             }
             else
             {
                 return io::Result<DWORD>::err(
-                    io::IoError(
-                        io::IoErrorKind::InvalidInput,
+                    io::Error(
+                        io::ErrorKind::InvalidInput,
                         "must specify at least one of read, write, or append access"));
             }
         }
@@ -70,8 +70,8 @@ namespace _fs_impl
             if (truncate || create || create_new)
             {
                 return io::Result<DWORD>::err(
-                    io::IoError(
-                        io::IoErrorKind::InvalidInput,
+                    io::Error(
+                        io::ErrorKind::InvalidInput,
                         "creating or truncating a file requires write or append access"));
             }
 
@@ -80,8 +80,8 @@ namespace _fs_impl
             if (truncate && !create_new)
             {
                 return io::Result<DWORD>::err(
-                    io::IoError(
-                        io::IoErrorKind::InvalidInput,
+                    io::Error(
+                        io::ErrorKind::InvalidInput,
                         "creating or truncating a file requires write or append access"));
             }
 

@@ -46,7 +46,7 @@ namespace _fs_impl
             else
             {
                 auto error = RtlNtStatusToDosError(status);
-                return io::Result<size_t>::err(io::IoError(io::IoErrorKind::Os, std::format("NtReadFile: OS error {}", error)));
+                return io::Result<size_t>::err(io::Error(io::ErrorKind::Os, std::format("NtReadFile: OS error {}", error)));
             }
         }
     }
@@ -93,7 +93,7 @@ namespace _fs_impl
             else
             {
                 auto error = RtlNtStatusToDosError(status);
-                return io::Result<size_t>::err(io::IoError(io::IoErrorKind::Os, std::format("NtWriteFile: OS error {}", error)));
+                return io::Result<size_t>::err(io::Error(io::ErrorKind::Os, std::format("NtWriteFile: OS error {}", error)));
             }
         }
     }
@@ -121,7 +121,7 @@ namespace _fs_impl
 
         if (handle == INVALID_HANDLE_VALUE)
         {
-            return io::Result<NativeFile>::err(io::IoError(io::IoErrorKind::Os, std::format("CreateFileW: OS error {}", GetLastError())));
+            return io::Result<NativeFile>::err(io::Error(io::ErrorKind::Os, std::format("CreateFileW: OS error {}", GetLastError())));
         }
 
         CloseHandleGuard guard(handle);
@@ -169,7 +169,7 @@ namespace _fs_impl
             whence = FILE_END;
             break;
         default:
-            return io::Result<uint64_t>::err(io::IoError(io::IoErrorKind::InvalidInput, "invalid seek type"));
+            return io::Result<uint64_t>::err(io::Error(io::ErrorKind::InvalidInput, "invalid seek type"));
         }
 
         LARGE_INTEGER pos = {};
