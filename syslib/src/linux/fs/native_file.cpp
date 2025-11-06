@@ -27,7 +27,7 @@ namespace _fs_impl
         int fd = ::open(path.c_str(), flags, options.mode);
         if (fd == -1)
         {
-            return io::Result<NativeFile>::err(io::Error(io::ErrorKind::Os, std::format("OS error %d", errno)));
+            return io::Result<NativeFile>::err(io::Error::last_os_error());
         }
 
         return io::Result<NativeFile>::ok(NativeFile(fd));
@@ -43,7 +43,7 @@ namespace _fs_impl
         auto bytes = ::read(_fd, buffer.data(), buffer.size());
         if (bytes == -1)
         {
-            return io::Result<size_t>::err(io::Error(io::ErrorKind::Os, std::format("OS error %d", errno)));
+            return io::Result<size_t>::err(io::Error::last_os_error());
         }
 
         return io::Result<size_t>::ok(static_cast<size_t>(bytes));
@@ -59,7 +59,7 @@ namespace _fs_impl
         auto bytes = ::write(_fd, buffer.data(), buffer.size());
         if (bytes == -1)
         {
-            return io::Result<size_t>::err(io::Error(io::ErrorKind::Os, std::format("OS error %d", errno)));
+            return io::Result<size_t>::err(io::Error::last_os_error());
         }
 
         return io::Result<size_t>::ok(static_cast<size_t>(bytes));
@@ -69,7 +69,7 @@ namespace _fs_impl
     {
         if (fsync(_fd) == -1)
         {
-            return io::Result<std::monostate>::err(io::Error(io::ErrorKind::Os, std::format("OS error %d", errno)));
+            return io::Result<std::monostate>::err(io::Error::last_os_error());
         }
 
         return io::Result<std::monostate>::ok(std::monostate{});
@@ -96,7 +96,7 @@ namespace _fs_impl
         auto offset = lseek(_fd, position.offset, whence);
         if (offset == -1)
         {
-            return io::Result<uint64_t>::err(io::Error(io::ErrorKind::Os, std::format("OS error %d", errno)));
+            return io::Result<uint64_t>::err(io::Error::last_os_error());
         }
 
         return io::Result<uint64_t>::ok(static_cast<uint64_t>(offset));
