@@ -46,7 +46,7 @@ namespace _fs_impl
             else
             {
                 auto error = RtlNtStatusToDosError(status);
-                return io::Result<size_t>::err(io::Error(io::ErrorKind::Os, std::format("NtReadFile: OS error {}", error)));
+                return io::Result<size_t>::err(io::Error::last_os_error());
             }
         }
     }
@@ -93,7 +93,7 @@ namespace _fs_impl
             else
             {
                 auto error = RtlNtStatusToDosError(status);
-                return io::Result<size_t>::err(io::Error(io::ErrorKind::Os, std::format("NtWriteFile: OS error {}", error)));
+                return io::Result<size_t>::err(io::Error::last_os_error());
             }
         }
     }
@@ -121,7 +121,7 @@ namespace _fs_impl
 
         if (handle == INVALID_HANDLE_VALUE)
         {
-            return io::Result<NativeFile>::err(io::Error(io::ErrorKind::Os, std::format("CreateFileW: OS error {}", GetLastError())));
+            return io::Result<NativeFile>::err(io::Error::last_os_error());
         }
 
         CloseHandleGuard guard(handle);

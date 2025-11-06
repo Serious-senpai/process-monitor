@@ -6,15 +6,13 @@ io::Result<std::wstring> to_widestring(const std::string &s)
     int required = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
     if (required == 0)
     {
-        return io::Result<std::wstring>::err(
-            io::Error(io::ErrorKind::Os, std::format("MultiByteToWideChar: OS error {}", GetLastError())));
+        return io::Result<std::wstring>::err(io::Error::last_os_error());
     }
 
     std::wstring result(required - 1, L'\0'); // exclude null terminator
     if (MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, result.data(), required) == 0)
     {
-        return io::Result<std::wstring>::err(
-            io::Error(io::ErrorKind::Os, std::format("MultiByteToWideChar: OS error {}", GetLastError())));
+        return io::Result<std::wstring>::err(io::Error::last_os_error());
     }
 
     return io::Result<std::wstring>::ok(std::move(result));
@@ -87,14 +85,14 @@ io::Result<path::PathBuf> get_long_path(path::PathBuf &&path, bool prefer_verbat
     DWORD buffer_size = GetFullPathNameW(path_str.c_str(), 0, nullptr, nullptr);
     if (buffer_size == 0)
     {
-        return io::Result<path::PathBuf>::err(io::Error(io::ErrorKind::Os, std::format("OS error {}", GetLastError())));
+        return io::Result<path::PathBuf>::err(io::Error::last_os_error());
     }
 
     std::vector<wchar_t> buffer(buffer_size);
     DWORD result = GetFullPathNameW(path_str.c_str(), buffer_size, buffer.data(), nullptr);
     if (result == 0 || result >= buffer_size)
     {
-        return io::Result<path::PathBuf>::err(io::Error(io::ErrorKind::Os, std::format("OS error {}", GetLastError())));
+        return io::Result<path::PathBuf>::err(io::Error::last_os_error());
     }
 
     // Convert buffer to wstring (excluding null terminator)

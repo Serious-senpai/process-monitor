@@ -1,0 +1,109 @@
+#include "sys.hpp"
+
+namespace sys
+{
+    io::ErrorKind decode_error_kind(int code)
+    {
+        switch (code)
+        {
+        case ERROR_ACCESS_DENIED:
+            return io::ErrorKind::PermissionDenied;
+        case ERROR_ALREADY_EXISTS:
+        case ERROR_FILE_EXISTS:
+            return io::ErrorKind::AlreadyExists;
+        case ERROR_BROKEN_PIPE:
+        case ERROR_NO_DATA:
+            return io::ErrorKind::BrokenPipe;
+        case ERROR_FILE_NOT_FOUND:
+        case ERROR_PATH_NOT_FOUND:
+        case ERROR_INVALID_DRIVE:
+        case ERROR_BAD_NETPATH:
+        case ERROR_BAD_NET_NAME:
+            return io::ErrorKind::NotFound;
+        case ERROR_INVALID_NAME:
+        case ERROR_BAD_PATHNAME:
+        case ERROR_FILENAME_EXCED_RANGE:
+            return io::ErrorKind::InvalidFilename;
+        case ERROR_INVALID_PARAMETER:
+        case WSAEINVAL:
+            return io::ErrorKind::InvalidInput;
+        case ERROR_NOT_ENOUGH_MEMORY:
+        case ERROR_OUTOFMEMORY:
+            return io::ErrorKind::OutOfMemory;
+        case ERROR_SEM_TIMEOUT:
+        case WAIT_TIMEOUT:
+        case ERROR_DRIVER_CANCEL_TIMEOUT:
+        case ERROR_OPERATION_ABORTED:
+        case ERROR_SERVICE_REQUEST_TIMEOUT:
+        case ERROR_COUNTER_TIMEOUT:
+        case ERROR_TIMEOUT:
+        case ERROR_RESOURCE_CALL_TIMED_OUT:
+        case ERROR_CTX_MODEM_RESPONSE_TIMEOUT:
+        case ERROR_CTX_CLIENT_QUERY_TIMEOUT:
+        case FRS_ERR_SYSVOL_POPULATE_TIMEOUT:
+        case ERROR_DS_TIMELIMIT_EXCEEDED:
+        case DNS_ERROR_RECORD_TIMED_OUT:
+        case ERROR_IPSEC_IKE_TIMED_OUT:
+        case ERROR_RUNLEVEL_SWITCH_TIMEOUT:
+        case ERROR_RUNLEVEL_SWITCH_AGENT_TIMEOUT:
+        case WSAETIMEDOUT:
+            return io::ErrorKind::TimedOut;
+        case ERROR_CALL_NOT_IMPLEMENTED:
+            return io::ErrorKind::Unsupported;
+        case ERROR_HOST_UNREACHABLE:
+        case WSAEHOSTUNREACH:
+            return io::ErrorKind::HostUnreachable;
+        case ERROR_NETWORK_UNREACHABLE:
+        case WSAENETUNREACH:
+            return io::ErrorKind::NetworkUnreachable;
+        case ERROR_DIRECTORY:
+            return io::ErrorKind::NotADirectory;
+        case ERROR_DIRECTORY_NOT_SUPPORTED:
+            return io::ErrorKind::IsADirectory;
+        case ERROR_DIR_NOT_EMPTY:
+            return io::ErrorKind::DirectoryNotEmpty;
+        case ERROR_WRITE_PROTECT:
+            return io::ErrorKind::ReadOnlyFilesystem;
+        case ERROR_DISK_FULL:
+        case ERROR_HANDLE_DISK_FULL:
+            return io::ErrorKind::StorageFull;
+        case ERROR_SEEK_ON_DEVICE:
+            return io::ErrorKind::NotSeekable;
+        case ERROR_DISK_QUOTA_EXCEEDED:
+        case WSAEDQUOT:
+            return io::ErrorKind::QuotaExceeded;
+        case ERROR_FILE_TOO_LARGE:
+            return io::ErrorKind::FileTooLarge;
+        case ERROR_BUSY:
+            return io::ErrorKind::ResourceBusy;
+        case ERROR_POSSIBLE_DEADLOCK:
+            return io::ErrorKind::Deadlock;
+        case ERROR_NOT_SAME_DEVICE:
+            return io::ErrorKind::CrossesDevices;
+        case ERROR_TOO_MANY_LINKS:
+            return io::ErrorKind::TooManyLinks;
+        case ERROR_CANT_RESOLVE_FILENAME:
+            return io::ErrorKind::FilesystemLoop;
+        case WSAEACCES:
+            return io::ErrorKind::PermissionDenied;
+        case WSAEADDRINUSE:
+            return io::ErrorKind::AddrInUse;
+        case WSAEADDRNOTAVAIL:
+            return io::ErrorKind::AddrNotAvailable;
+        case WSAECONNABORTED:
+            return io::ErrorKind::ConnectionAborted;
+        case WSAECONNREFUSED:
+            return io::ErrorKind::ConnectionRefused;
+        case WSAECONNRESET:
+            return io::ErrorKind::ConnectionReset;
+        case WSAENOTCONN:
+            return io::ErrorKind::NotConnected;
+        case WSAEWOULDBLOCK:
+            return io::ErrorKind::WouldBlock;
+        case WSAENETDOWN:
+            return io::ErrorKind::NetworkDown;
+        default:
+            return io::ErrorKind::Other;
+        }
+    }
+}

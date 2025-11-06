@@ -91,9 +91,13 @@ namespace io
         UnexpectedEof,
         /** @brief An operation could not be completed, because it failed to allocate enough memory. */
         OutOfMemory,
+        /** @brief The operation was partially successful and needs to be checked later on due to not blocking. */
+        InProgress,
         /** @brief A custom error that does not fall under any other I/O error kind. */
         Other,
     };
+
+    const char *format_error_kind(ErrorKind kind);
 
     /**
      * @brief Enumeration of possible methods to seek within an I/O object.
@@ -124,10 +128,10 @@ namespace io
 
     public:
         /** @brief Creates a new I/O error from a known kind of error as well as an arbitrary error payload. */
-        explicit Error(ErrorKind kind, std::string &&message);
+        explicit Error(ErrorKind kind, const std::string &message);
 
         /** @brief Creates a new I/O error from an arbitrary error payload. */
-        static Error other(std::string &&message);
+        static Error other(const std::string &message);
 
         /** @brief Creates a new instance of an @ref Error from a particular OS error code. */
         static Error from_raw_os_error(int code);
