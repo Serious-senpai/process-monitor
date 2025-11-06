@@ -104,10 +104,15 @@ namespace fs
             return result;
         }
 
-        auto m = metadata(path);
-        if (m.is_ok() && m.unwrap().is_dir())
+        if (result.unwrap_err().kind() != io::ErrorKind::NotFound)
         {
-            return io::Result<std::monostate>::ok(std::monostate{});
+            auto m = metadata(path);
+            if (m.is_ok() && m.unwrap().is_dir())
+            {
+                return io::Result<std::monostate>::ok(std::monostate{});
+            }
+
+            return result;
         }
 
         auto parent = path.parent_path();

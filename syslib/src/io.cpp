@@ -107,6 +107,11 @@ namespace io
         return Error(kind, std::format("OS error {}", code));
     }
 
+    ErrorKind Error::kind() const noexcept
+    {
+        return _kind;
+    }
+
     const char *Error::message() const noexcept
     {
         return _message.c_str();

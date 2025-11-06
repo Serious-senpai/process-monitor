@@ -139,6 +139,7 @@ namespace io
         /** @brief Returns an error representing the last OS error which occurred. */
         static Error last_os_error();
 
+        ErrorKind kind() const noexcept;
         const char *message() const noexcept override;
     };
 
