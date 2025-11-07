@@ -4,10 +4,9 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-linux-listener-common = { path = "../linux-listener-common" }
-
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
+linux-listener-common = { path = "../linux-listener-common" }
 network-types = "0.1.0"
 
 [build-dependencies]
