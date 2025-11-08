@@ -22,7 +22,7 @@
                 "git.autorefresh": true,
                 "git.enabled": true,
                 "rust-analyzer.linkedProjects": [
-                    "/workspaces/process-monitor/linux-listener/Cargo.toml"
+                    "${workspaceFolder}/linux-listener/Cargo.toml"
                 ]
             }
         }
