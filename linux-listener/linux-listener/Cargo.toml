@@ -9,7 +9,7 @@ anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
 aya-log = { workspace = true }
 clap = { workspace = true, features = ["derive", "error-context", "help", "std"] }
-linux-listener-common = { path = "../linux-listener-common", features = ["user"] }
+linux-listener-common = { path = "../linux-listener-common", features = ["std"] }
 log = { workspace = true }
 simplelog = { workspace = true, features = ["local-offset", "termcolor"] }
 tokio = { workspace = true, features = ["full"] }

@@ -1,13 +1,14 @@
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
+use std::{ptr, thread};
 
 use aya::Ebpf;
-use aya::maps::RingBuf;
+use aya::maps::{HashMap, MapData, RingBuf};
 use aya::programs::KProbe;
 use aya_log::EbpfLogger;
 use clap::Parser;
 use linux_listener::cli::Arguments;
+use linux_listener_common::types::{StaticCommandName, Threshold, Violation};
 use log::{LevelFilter, SetLoggerError, debug, info, warn};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 use tokio::io::unix::AsyncFd;
@@ -33,7 +34,7 @@ fn initialize_logger(level: LevelFilter) -> Result<(), SetLoggerError> {
     TermLogger::init(level, cfg, TerminalMode::Stderr, ColorChoice::Auto)
 }
 
-fn attach_kretprobe_send(hook: &mut KProbe) -> anyhow::Result<()> {
+fn attach_kretprobe_network(hook: &mut KProbe) -> anyhow::Result<()> {
     hook.load()?;
 
     if !try_hook!(hook, "__sys_sendmsg", 0) && !try_hook!(hook, "__x64_sys_sendmsg", 0) {
@@ -47,12 +48,6 @@ fn attach_kretprobe_send(hook: &mut KProbe) -> anyhow::Result<()> {
     if !try_hook!(hook, "__sys_sendfile", 0) && !try_hook!(hook, "__x64_sys_sendfile", 0) {
         warn!("Unable to hook to sendfile");
     }
-
-    Ok(())
-}
-
-fn attach_kretprobe_receive(hook: &mut KProbe) -> anyhow::Result<()> {
-    hook.load()?;
 
     if !try_hook!(hook, "__sys_recvmsg", 0) && !try_hook!(hook, "__x64_sys_recvmsg", 0) {
         warn!("Unable to hook to recvmsg");
@@ -98,19 +93,29 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    let mut hashmap = HashMap::<MapData, StaticCommandName, Threshold>::try_from(
+        ebpf.take_map("NAMES")
+            .expect("Check the eBPF program again"),
+    )?;
+
+    let mut name = [0u8; 16];
+    name[..4].copy_from_slice(b"curl");
+    hashmap.insert(
+        &name,
+        Threshold {
+            thresholds: [0, 0, 0, 0],
+        },
+        0,
+    )?;
+
     let ring_buf = RingBuf::try_from(
         ebpf.take_map("EVENTS")
             .expect("Check the eBPF program again"),
     )?;
     let mut ring_buf_fd = AsyncFd::new(ring_buf)?;
 
-    attach_kretprobe_send(
-        ebpf.program_mut("kretprobe_send_hook")
-            .expect("Check the eBPF program again")
-            .try_into()?,
-    )?;
-    attach_kretprobe_receive(
-        ebpf.program_mut("kretprobe_receive_hook")
+    attach_kretprobe_network(
+        ebpf.program_mut("kretprobe_network_hook")
             .expect("Check the eBPF program again")
             .try_into()?,
     )?;
@@ -129,7 +134,12 @@ async fn main() -> anyhow::Result<()> {
                 while let Some(item) = ring_buf.get_mut().next()
                     && !stopped.initialized()
                 {
-                    info!("Received data: {:?}", item.as_ref());
+                    let violation =
+                        unsafe { ptr::read_unaligned(item.as_ptr() as *const Violation) };
+                    info!(
+                        "Received data: {violation:?}, command {:?}",
+                        violation.command_name(),
+                    );
                 }
 
                 guard.clear_ready();
