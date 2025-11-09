@@ -4,26 +4,61 @@
 use core::panic::PanicInfo;
 
 use aya_ebpf::EbpfContext;
-use aya_ebpf::bindings::xdp_action::XDP_PASS;
-use aya_ebpf::macros::{kretprobe, xdp};
-use aya_ebpf::programs::{RetProbeContext, XdpContext};
-use aya_log_ebpf::info;
+use aya_ebpf::macros::{kretprobe, map};
+use aya_ebpf::maps::RingBuf;
+use aya_ebpf::programs::RetProbeContext;
+// use aya_log_ebpf::{info, warn};
 
-#[xdp]
-pub fn xdp_hook(ctx: XdpContext) -> u32 {
-    if ctx.data() < ctx.data_end() {
-        let size = ctx.data_end() - ctx.data();
-        info!(&ctx, "Process unknown received {} bytes", size);
+#[map]
+static EVENTS: RingBuf = RingBuf::pinned(4096, 0);
+
+// View probable kernel functions using `sudo cat /proc/kallsyms`.
+
+#[kretprobe]
+pub fn kretprobe_send_hook(ctx: RetProbeContext) -> u32 {
+    let size = ctx.ret::<i32>();
+    if ctx.pid() == 17270 && size > 0 {
+        match EVENTS.reserve::<(u32, i32)>(0) {
+            Some(mut entry) => {
+                entry.write((ctx.pid(), size));
+                entry.submit(0);
+            }
+            None => {
+                // warn!(&ctx, "[kretprobe] Failed to reserve space in ring buffer");
+            }
+        }
+
+        // info!(
+        //     &ctx,
+        //     "[kretprobe] Process {} sent {} bytes",
+        //     ctx.pid(),
+        //     size
+        // );
     }
 
-    XDP_PASS
+    0
 }
 
 #[kretprobe]
-pub fn recv_variants_hook(ctx: RetProbeContext) -> u32 {
+pub fn kretprobe_receive_hook(ctx: RetProbeContext) -> u32 {
     let size = ctx.ret::<i32>();
-    if size > 0 {
-        info!(&ctx, "Process {} received {} bytes", ctx.pid(), size);
+    if ctx.pid() == 17270 && size > 0 {
+        match EVENTS.reserve::<(u32, i32)>(0) {
+            Some(mut entry) => {
+                entry.write((ctx.pid(), size));
+                entry.submit(0);
+            }
+            None => {
+                // warn!(&ctx, "[kretprobe] Failed to reserve space in ring buffer");
+            }
+        }
+
+        // info!(
+        //     &ctx,
+        //     "[kretprobe] Process {} received {} bytes",
+        //     ctx.pid(),
+        //     size
+        // );
     }
 
     0

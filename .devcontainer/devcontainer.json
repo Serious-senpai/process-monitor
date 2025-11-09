@@ -21,8 +21,16 @@
                 "files.insertFinalNewline": true,
                 "git.autorefresh": true,
                 "git.enabled": true,
+                "rust-analyzer.check.overrideCommand": [
+                    "cargo",
+                    "check",
+                    "--message-format=json"
+                ],
                 "rust-analyzer.linkedProjects": [
                     "${workspaceFolder}/linux-listener/Cargo.toml"
+                ],
+                "rust-analyzer.rustfmt.extraArgs": [
+                    "+nightly"
                 ]
             }
         }

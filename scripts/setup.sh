@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Setup script for a brand new Ubuntu 24.04 virtual machine (it may still work with other versions idk)
+
 # Install stuff
 sudo apt-get update
 sudo apt-get install -y build-essential cmake curl doxygen git graphviz libssl-dev openssh-server pkg-config python3 python-is-python3

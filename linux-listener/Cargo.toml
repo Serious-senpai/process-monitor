@@ -8,8 +8,8 @@ members = [
 default-members = ["linux-listener", "linux-listener-common"]
 
 [workspace.package]
-license = "MIT OR Apache-2.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 anyhow = { version = "1.0.100", default-features = false }
@@ -19,13 +19,40 @@ aya-ebpf = { git = "https://github.com/aya-rs/aya", default-features = false }
 aya-log = { git = "https://github.com/aya-rs/aya", default-features = false }
 aya-log-ebpf = { git = "https://github.com/aya-rs/aya", default-features = false }
 cargo_metadata = { version = "0.23.0", default-features = false }
-clap = { version = "4.5.51", default-features = false, features = ["std"] }
-libc = { version = "0.2.159", default-features = false }
+clap = { version = "4.5.51", default-features = false }
 log = { version = "0.4.22", default-features = false }
-simplelog = "0.12.2"
+simplelog = { version = "0.12.2", default-features = false }
 tokio = { version = "1.40.0", default-features = false }
 which = { version = "6.0.0", default-features = false }
 
+[workspace.lints.clippy]
+absolute_paths = "warn"
+assigning_clones = "warn"
+bool_to_int_with_if = "warn"
+branches_sharing_code = "warn"
+cast_lossless = "warn"
+cloned_instead_of_copied = "warn"
+collection_is_never_read = "warn"
+elidable_lifetime_names = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets = "warn"
+if_not_else = "warn"
+implicit_clone = "warn"
+inconsistent_struct_constructor = "warn"
+inefficient_to_string = "warn"
+manual_instant_elapsed = "warn"
+manual_string_new = "warn"
+map_unwrap_or = "warn"
+match_bool = "warn"
+match_same_arms = "warn"
+needless_collect = "warn"
+needless_continue = "warn"
+suboptimal_flops = "warn"
+too_many_arguments = "allow"
+trait_duplication_in_bounds = "warn"
+use_self = "warn"
+wildcard_imports = "warn"
+
 [profile.release.package.linux-listener-ebpf]
-debug = 2
+debug = 0
 codegen-units = 1

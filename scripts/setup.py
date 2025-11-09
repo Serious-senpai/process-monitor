@@ -23,19 +23,18 @@ with VSCODE_SETTINGS.open("w", encoding="utf-8") as writer:
         "files.insertFinalNewline": True,
         "git.autorefresh": True,
         "git.enabled": True,
+        "rust-analyzer.check.overrideCommand": ["cargo", "check", "--message-format=json"],
         "rust-analyzer.linkedProjects": [],
-        "rust-analyzer.rustfmt.extraArgs": [
-            "+nightly",
-        ],
+        "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
     }
 
     if sys.platform == "win32":
         settings["C_Cpp.files.exclude"]["**/linux/**"] = True
-        settings["rust-analyzer.linkedProjects"].append("${workspaceFolder}/windows-listener")
+        settings["rust-analyzer.linkedProjects"].append("${workspaceFolder}/windows-listener/Cargo.toml")
 
     elif sys.platform == "linux":
         settings["C_Cpp.files.exclude"]["**/win32/**"] = True
-        settings["rust-analyzer.linkedProjects"].append("${workspaceFolder}/linux-listener")
+        settings["rust-analyzer.linkedProjects"].append("${workspaceFolder}/linux-listener/Cargo.toml")
 
     else:
         raise RuntimeError(f"Unsupported platform {sys.platform!r}")

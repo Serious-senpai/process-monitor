@@ -2,24 +2,17 @@
 name = "linux-listener"
 version = "0.1.0"
 edition.workspace = true
-
 license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
 aya-log = { workspace = true }
-clap = { workspace = true, features = ["derive", "error-context", "help"] }
-libc = { workspace = true }
+clap = { workspace = true, features = ["derive", "error-context", "help", "std"] }
 linux-listener-common = { path = "../linux-listener-common", features = ["user"] }
 log = { workspace = true }
-simplelog = { workspace = true }
-tokio = { workspace = true, features = [
-        "macros",
-        "rt",
-        "rt-multi-thread",
-        "signal",
-    ] }
+simplelog = { workspace = true, features = ["local-offset", "termcolor"] }
+tokio = { workspace = true, features = ["full"] }
 
 [build-dependencies]
 anyhow = { workspace = true }
@@ -40,6 +33,5 @@ cargo_metadata = { workspace = true }
 # features.
 linux-listener-ebpf = { path = "../linux-listener-ebpf" }
 
-[[bin]]
-name = "linux-listener"
-path = "src/main.rs"
+[lints]
+workspace = true

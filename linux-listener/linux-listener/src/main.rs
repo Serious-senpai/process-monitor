@@ -1,65 +1,92 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use aya::Ebpf;
-use aya::programs::{KProbe, Xdp};
+use aya::maps::RingBuf;
+use aya::programs::KProbe;
 use aya_log::EbpfLogger;
 use clap::Parser;
-use log::LevelFilter;
-use log::{info, warn};
+use linux_listener::cli::Arguments;
+use log::{LevelFilter, SetLoggerError, debug, info, warn};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
+use tokio::io::unix::AsyncFd;
 use tokio::signal;
+use tokio::sync::SetOnce;
 
-#[derive(Debug, Parser)]
-struct Arguments {
-    #[clap(short, long, default_value = "eth0")]
-    pub interface: String,
+macro_rules! try_hook {
+    ($hook:expr, $target:expr, $($args:expr),* $(,)?) => {
+        $hook
+            .attach($target, $($args),+)
+            .inspect_err(|e| warn!("Unable to hook to {}: {e}", $target))
+            .is_ok()
+    };
 }
 
-fn initialize_logger(level: LevelFilter) -> Box<TermLogger> {
+fn initialize_logger(level: LevelFilter) -> Result<(), SetLoggerError> {
     let cfg = ConfigBuilder::new()
         .set_location_level(level)
         .set_time_offset_to_local()
         .unwrap_or_else(|e| e)
         .build();
 
-    TermLogger::new(level, cfg, TerminalMode::Stderr, ColorChoice::Auto)
+    TermLogger::init(level, cfg, TerminalMode::Stderr, ColorChoice::Auto)
 }
 
-fn attach_recv(hook: &mut KProbe) -> anyhow::Result<()> {
+fn attach_kretprobe_send(hook: &mut KProbe) -> anyhow::Result<()> {
     hook.load()?;
-    hook.attach("__sys_recvmsg", 0)?;
-    hook.attach("__sys_recvfrom", 0)?;
+
+    if !try_hook!(hook, "__sys_sendmsg", 0) && !try_hook!(hook, "__x64_sys_sendmsg", 0) {
+        warn!("Unable to hook to sendmsg");
+    }
+
+    if !try_hook!(hook, "__sys_write", 0) && !try_hook!(hook, "__x64_sys_write", 0) {
+        warn!("Unable to hook to write");
+    }
+
+    if !try_hook!(hook, "__sys_sendfile", 0) && !try_hook!(hook, "__x64_sys_sendfile", 0) {
+        warn!("Unable to hook to sendfile");
+    }
+
     Ok(())
 }
 
-fn attach_xdp(hook: &mut Xdp, interface: &str) -> anyhow::Result<()> {
+fn attach_kretprobe_receive(hook: &mut KProbe) -> anyhow::Result<()> {
     hook.load()?;
-    hook.attach(interface, aya::programs::XdpFlags::default())?;
+
+    if !try_hook!(hook, "__sys_recvmsg", 0) && !try_hook!(hook, "__x64_sys_recvmsg", 0) {
+        warn!("Unable to hook to recvmsg");
+    }
+
+    if !try_hook!(hook, "__sys_read", 0) && !try_hook!(hook, "__x64_sys_read", 0) {
+        warn!("Unable to hook to read");
+    }
+
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let arguments = Arguments::parse();
-    let _ = log::set_boxed_logger(initialize_logger(LevelFilter::Info))
-        .inspect_err(|e| warn!("Unable to set default logger: {e}"));
+    let arguments = Arguments::parse(); // We will use this someday, but not now.
 
+    let _ = initialize_logger(arguments.log_level)
+        .inspect_err(|e| eprintln!("Unable to set default logger: {e}"));
+
+    debug!("Loading eBPF program...");
     let mut ebpf = Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("OUT_DIR"),
         "/linux-listener"
     )))?;
+    info!("eBPF program loaded");
 
-    let stopped = Arc::new(AtomicBool::new(false));
+    let stopped = Arc::new(SetOnce::new());
     let handle = match EbpfLogger::init(&mut ebpf) {
         Ok(mut logger) => {
             info!("eBPF logger initialized");
 
             let stopped = stopped.clone();
             Some(thread::spawn(move || {
-                while !stopped.load(Ordering::Relaxed) {
+                while !stopped.initialized() {
                     logger.flush();
                     thread::sleep(Duration::from_secs(1));
                 }
@@ -71,26 +98,56 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    attach_recv(
-        ebpf.program_mut("recv_variants_hook")
+    let ring_buf = RingBuf::try_from(
+        ebpf.take_map("EVENTS")
+            .expect("Check the eBPF program again"),
+    )?;
+    let mut ring_buf_fd = AsyncFd::new(ring_buf)?;
+
+    attach_kretprobe_send(
+        ebpf.program_mut("kretprobe_send_hook")
             .expect("Check the eBPF program again")
             .try_into()?,
     )?;
-    attach_xdp(
-        ebpf.program_mut("xdp_hook")
+    attach_kretprobe_receive(
+        ebpf.program_mut("kretprobe_receive_hook")
             .expect("Check the eBPF program again")
             .try_into()?,
-        &arguments.interface,
     )?;
+
+    let communicate = {
+        let stopped = stopped.clone();
+        tokio::spawn(async move {
+            info!("Started communication task");
+            while !stopped.initialized() {
+                let mut guard = tokio::select! {
+                    _ = stopped.wait() => break,
+                    guard = ring_buf_fd.readable_mut() => guard.unwrap(),
+                };
+
+                let ring_buf = guard.get_mut();
+                while let Some(item) = ring_buf.get_mut().next()
+                    && !stopped.initialized()
+                {
+                    info!("Received data: {:?}", item.as_ref());
+                }
+
+                guard.clear_ready();
+            }
+        })
+    };
 
     info!("Listening for packets... Press Ctrl+C to exit.");
     signal::ctrl_c().await.expect("Unable to listen for Ctrl-C");
 
     info!("Received Ctrl-C. Exiting...");
-    stopped.store(true, Ordering::Relaxed);
+    stopped.set(())?;
+
     if let Some(handle) = handle {
         handle.join().unwrap();
     }
+
+    communicate.await?;
 
     Ok(())
 }
