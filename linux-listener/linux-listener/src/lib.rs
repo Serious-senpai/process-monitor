@@ -25,25 +25,11 @@ macro_rules! _try_hook {
 fn attach_kretprobe_network(hook: &mut KProbe) -> anyhow::Result<()> {
     hook.load()?;
 
-    if !_try_hook!(hook, "__sys_sendmsg", 0) && !_try_hook!(hook, "__x64_sys_sendmsg", 0) {
-        warn!("Unable to hook to sendmsg");
-    }
-
-    if !_try_hook!(hook, "__sys_write", 0) && !_try_hook!(hook, "__x64_sys_write", 0) {
-        warn!("Unable to hook to write");
-    }
-
-    if !_try_hook!(hook, "__sys_sendfile", 0) && !_try_hook!(hook, "__x64_sys_sendfile", 0) {
-        warn!("Unable to hook to sendfile");
-    }
-
-    if !_try_hook!(hook, "__sys_recvmsg", 0) && !_try_hook!(hook, "__x64_sys_recvmsg", 0) {
-        warn!("Unable to hook to recvmsg");
-    }
-
-    if !_try_hook!(hook, "__sys_read", 0) && !_try_hook!(hook, "__x64_sys_read", 0) {
-        warn!("Unable to hook to read");
-    }
+    let _ = _try_hook!(hook, "tcp_sendmsg", 0);
+    let _ = _try_hook!(hook, "tcp_recvmsg", 0);
+    let _ = _try_hook!(hook, "tcp_sendmsg_fastopen", 0);
+    let _ = _try_hook!(hook, "udp_sendmsg", 0);
+    let _ = _try_hook!(hook, "udp_recvmsg", 0);
 
     Ok(())
 }
