@@ -4,15 +4,19 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
 aya-log = { workspace = true }
 clap = { workspace = true, features = ["derive", "error-context", "help", "std"] }
+ctor = { workspace = true, features = ["dtor", "proc_macro"] }
+libc = { workspace = true }
 linux-listener-common = { path = "../linux-listener-common", features = ["std"] }
 log = { workspace = true }
 simplelog = { workspace = true, features = ["local-offset", "termcolor"] }
-tokio = { workspace = true, features = ["full"] }
 
 [build-dependencies]
 anyhow = { workspace = true }

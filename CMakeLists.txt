@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SystemLibrary LANGUAGES CXX)
+project(ProcessMonitorClient LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -13,6 +13,13 @@ file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${ROOT}/src/*.cpp")
 add_executable(pm-client "${ROOT}/src/main.cpp")
 # target_include_directories(pm-client PRIVATE "${ROOT}/include")
 target_link_libraries(pm-client PRIVATE SystemLibrary)
+
+# Rust bindings
+if(WIN32)
+elseif(UNIX)
+    target_include_directories(pm-client PRIVATE "${ROOT}/linux-listener")
+    target_link_libraries(pm-client PRIVATE "${ROOT}/linux-listener/target/release/liblinux_listener.so")
+endif()
 
 enable_testing()
 
