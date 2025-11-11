@@ -11,13 +11,12 @@ message(STATUS "Got root of repository: ${ROOT}")
 file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${ROOT}/src/*.cpp")
 
 add_executable(pm-client "${ROOT}/src/main.cpp")
-# target_include_directories(pm-client PRIVATE "${ROOT}/include")
+target_include_directories(pm-client PRIVATE "${ROOT}/bindings")
 target_link_libraries(pm-client PRIVATE SystemLibrary)
 
 # Rust bindings
 if(WIN32)
 elseif(UNIX)
-    target_include_directories(pm-client PRIVATE "${ROOT}/linux-listener")
     target_link_libraries(pm-client PRIVATE "${ROOT}/linux-listener/target/release/liblinux_listener.so")
 endif()
 

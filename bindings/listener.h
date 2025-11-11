@@ -5,7 +5,7 @@ extern "C"
 
     struct Threshold
     {
-        long long threshold[4];
+        uint32_t threshold[4];
     };
 
     enum Metric : unsigned char
@@ -18,11 +18,11 @@ extern "C"
 
     struct Violation
     {
-        unsigned int pid;
+        uint32_t pid;
         char name[16];
         Metric metric;
-        long long value;
-        long long threshold;
+        uint32_t value;
+        uint32_t threshold;
     };
 
     struct KernelTracerHandle;

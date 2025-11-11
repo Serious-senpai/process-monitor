@@ -25,14 +25,22 @@ macro_rules! _try_hook {
 fn attach_kretprobe_network(hook: &mut KProbe) -> anyhow::Result<()> {
     hook.load()?;
 
-    let _ = _try_hook!(hook, "tcp_sendmsg", 0);
-    let _ = _try_hook!(hook, "tcp_recvmsg", 0);
-    let _ = _try_hook!(hook, "tcp_sendmsg_fastopen", 0);
-    let _ = _try_hook!(hook, "udp_sendmsg", 0);
-    let _ = _try_hook!(hook, "udp_recvmsg", 0);
+    let _ = _try_hook!(hook, "inet_sendmsg", 0);
+    let _ = _try_hook!(hook, "inet_recvmsg", 0);
 
     Ok(())
 }
+
+// This is also another option, but per-process data is hard to collect here.
+// fn attach_classifier_network(hook: &mut SchedClassifier) -> anyhow::Result<()> {
+//     let _ = tc::qdisc_add_clsact("enp0s3");
+//     hook.load()?;
+
+//     let _ = _try_hook!(hook, "enp0s3", tc::TcAttachType::Ingress);
+//     let _ = _try_hook!(hook, "enp0s3", tc::TcAttachType::Egress);
+
+//     Ok(())
+// }
 
 pub struct KernelTracer {
     pub ebpf: Mutex<Ebpf>,
@@ -129,6 +137,11 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
                 .expect("Check the eBPF program again for kretprobe_network_hook")
                 .try_into()?,
         )?;
+        // attach_classifier_network(
+        //     ebpf.program_mut("classifier_network_hook")
+        //         .expect("Check the eBPF program again for classifier_network_hook")
+        //         .try_into()?,
+        // )?;
 
         debug!("Completed loading eBPF program");
         Ok(KernelTracer {

@@ -1,5 +1,3 @@
-use core::ffi::{c_uint, c_ulonglong};
-
 #[cfg(feature = "std")]
 use aya::Pod;
 use aya_ebpf::TASK_COMM_LEN;
@@ -8,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Threshold {
-    pub thresholds: [c_ulonglong; 4],
+    pub thresholds: [u32; 4],
 }
 
 #[cfg(feature = "std")]
@@ -45,11 +43,11 @@ impl From<&str> for StaticCommandName {
 #[repr(C)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Violation {
-    pub pid: c_uint,
+    pub pid: u32,
     pub name: StaticCommandName,
     pub metric: Metric,
-    pub value: c_ulonglong,
-    pub threshold: c_ulonglong,
+    pub value: u32,
+    pub threshold: u32,
 }
 
 impl Violation {

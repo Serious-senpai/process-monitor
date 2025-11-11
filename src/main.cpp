@@ -1,9 +1,9 @@
 #include "pch.hpp"
-#include "linux_listener.h"
+#include "listener.h"
 
 int main(int argc, char **argv)
 {
-    if (initialize_logger() || set_log_level(4))
+    if (initialize_logger() || set_log_level(3))
     {
         std::cerr << "Failed to initialize logger." << std::endl;
         return 1;
