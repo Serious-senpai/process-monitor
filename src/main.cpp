@@ -17,7 +17,7 @@ int main(int argc, char **argv)
     }
 
     Threshold threshold = {};
-    threshold.threshold[Metric::NETWORK] = 0;
+    threshold.threshold[Metric::DISK] = threshold.threshold[Metric::NETWORK] = 0;
     for (int i = 1; i < argc; i++)
     {
         if (set_monitor(tracer, argv[i], &threshold))

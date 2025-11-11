@@ -13,7 +13,7 @@ pub struct Threshold {
 unsafe impl Pod for Threshold {}
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Metric {
     Cpu,
     Memory,

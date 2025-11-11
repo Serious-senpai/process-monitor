@@ -7,13 +7,19 @@ use std::{ptr, thread};
 
 use aya::Ebpf;
 use aya::maps::{HashMap, MapData, RingBuf};
-use aya::programs::KProbe;
+use aya::programs::{KProbe, TracePoint};
 use aya_log::EbpfLogger;
 use linux_listener_common::types::{StaticCommandName, Threshold, Violation};
 use log::{LevelFilter, debug, error, warn};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 
 macro_rules! _try_hook {
+    ($hook:expr) => {
+        $hook
+            .attach()
+            .inspect_err(|e| warn!("Unable to hook: {e}"))
+            .is_ok()
+    };
     ($hook:expr, $target:expr, $($args:expr),* $(,)?) => {
         $hook
             .attach($target, $($args),+)
@@ -41,6 +47,14 @@ fn attach_kretprobe_network(hook: &mut KProbe) -> anyhow::Result<()> {
 
 //     Ok(())
 // }
+
+fn attach_tracepoint_disk(hook: &mut TracePoint) -> anyhow::Result<()> {
+    hook.load()?;
+
+    let _ = _try_hook!(hook, "block", "block_rq_complete");
+
+    Ok(())
+}
 
 pub struct KernelTracer {
     pub ebpf: Mutex<Ebpf>,
@@ -142,6 +156,11 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
         //         .expect("Check the eBPF program again for classifier_network_hook")
         //         .try_into()?,
         // )?;
+        attach_tracepoint_disk(
+            ebpf.program_mut("tracepoint_disk_hook")
+                .expect("Check the eBPF program again for tracepoint_disk_hook")
+                .try_into()?,
+        )?;
 
         debug!("Completed loading eBPF program");
         Ok(KernelTracer {
