@@ -1,3 +1,7 @@
+#pragma once
+
+#include "pch.hpp"
+
 #ifdef __cplusplus
 extern "C"
 {
