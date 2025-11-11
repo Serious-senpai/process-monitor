@@ -159,4 +159,26 @@ namespace fs
      * @see https://doc.rust-lang.org/std/fs/fn.metadata.html
      */
     io::Result<Metadata> metadata(const path::PathBuf &path);
+
+    class DirEntry : public NonConstructible
+    {
+    private:
+        _fs_impl::NativeDirEntry _inner;
+
+    public:
+        explicit DirEntry(_fs_impl::NativeDirEntry &&inner);
+        io::Result<bool> next();
+    };
+
+    class ReadDir : public NonConstructible
+    {
+    private:
+        _fs_impl::NativeReadDir _inner;
+
+    public:
+        explicit ReadDir(_fs_impl::NativeReadDir &&inner);
+        DirEntry begin() const;
+    };
+
+    ReadDir read_dir(path::PathBuf &&path);
 }

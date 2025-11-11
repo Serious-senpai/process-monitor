@@ -19,6 +19,7 @@
 
 #define _FILE_OFFSET_BITS 64
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>

@@ -138,3 +138,37 @@ INSTANTIATE_TEST_SUITE_P(
         FileReadWriteData{very_long_filepath(150, 200), "This is a very long filename."},
 #endif
         FileReadWriteData{very_long_filepath(15, 200), "This is a very long filename."}));
+
+TEST(ListDirectory, CreateList)
+{
+    auto dir_path = BASE_TEST_DIR / "ls" / "layer1" / "layer2";
+    fs::create_dir_all(dir_path);
+
+    auto metadata = fs::metadata(dir_path);
+    ASSERT_TRUE(metadata.is_ok());
+    ASSERT_TRUE(metadata.unwrap().is_dir());
+
+    for (int i = 0; i < 10; i++)
+    {
+        auto file_path = dir_path / std::format("file-{}.txt", i);
+        auto create_result = fs::File::create_new(file_path);
+        ASSERT_TRUE(create_result.is_ok());
+    }
+
+    auto read_dir = fs::read_dir(std::move(dir_path));
+    auto entry = read_dir.begin();
+
+    int file_count = 0;
+    while (true)
+    {
+        auto next = entry.next();
+        ASSERT_TRUE(next.is_ok());
+        file_count++;
+        if (!next.unwrap())
+        {
+            break;
+        }
+    }
+
+    ASSERT_EQ(file_count, 12);
+}

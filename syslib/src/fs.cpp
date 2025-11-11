@@ -171,4 +171,26 @@ namespace fs
         auto metadata = SHORT_CIRCUIT(Metadata, _fs_impl::metadata(path));
         return io::Result<Metadata>::ok(Metadata(std::move(metadata)));
     }
+
+    DirEntry::DirEntry(_fs_impl::NativeDirEntry &&inner)
+        : NonConstructible(NonConstructibleTag::TAG), _inner(std::move(inner)) {}
+
+    io::Result<bool> DirEntry::next()
+    {
+        return _inner.next();
+    }
+
+    ReadDir::ReadDir(_fs_impl::NativeReadDir &&inner)
+        : NonConstructible(NonConstructibleTag::TAG), _inner(std::move(inner)) {}
+
+    DirEntry ReadDir::begin() const
+    {
+        auto dir = opendir(_inner.path().c_str());
+        return DirEntry(_fs_impl::NativeDirEntry(dir));
+    }
+
+    ReadDir read_dir(path::PathBuf &&path)
+    {
+        return ReadDir(_fs_impl::NativeReadDir(std::move(path)));
+    }
 }

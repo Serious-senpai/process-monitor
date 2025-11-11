@@ -103,4 +103,29 @@ namespace _fs_impl
     };
 
     io::Result<NativeMetadata> metadata(const path::PathBuf &path);
+
+    class NativeDirEntry : public NonConstructible
+    {
+    private:
+        DIR *_dir;
+        dirent *_entry;
+
+    public:
+        explicit NativeDirEntry(DIR *dir);
+        NativeDirEntry(NativeDirEntry &&other);
+        ~NativeDirEntry();
+
+        io::Result<bool> next();
+    };
+
+    class NativeReadDir : public NonConstructible
+    {
+    private:
+        path::PathBuf _path;
+
+    public:
+        explicit NativeReadDir(path::PathBuf &&path);
+
+        const path::PathBuf &path() const noexcept;
+    };
 }
