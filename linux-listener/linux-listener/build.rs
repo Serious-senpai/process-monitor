@@ -1,0 +1,29 @@
+use anyhow::{Context, anyhow};
+use aya_build::Toolchain;
+
+fn main() -> anyhow::Result<()> {
+    let cargo_metadata::Metadata { packages, .. } = cargo_metadata::MetadataCommand::new()
+        .no_deps()
+        .exec()
+        .context("MetadataCommand::exec")?;
+
+    let cargo_metadata::Package {
+        name,
+        manifest_path,
+        ..
+    } = packages
+        .into_iter()
+        .find(|cargo_metadata::Package { name, .. }| name.as_str() == "linux-listener-ebpf")
+        .ok_or_else(|| anyhow!("linux-listener-ebpf package not found"))?;
+
+    let ebpf_package = aya_build::Package {
+        name: name.as_str(),
+        root_dir: manifest_path
+            .parent()
+            .ok_or_else(|| anyhow!("no parent for {manifest_path}"))?
+            .as_str(),
+        ..Default::default()
+    };
+
+    aya_build::build_ebpf([ebpf_package], Toolchain::default())
+}

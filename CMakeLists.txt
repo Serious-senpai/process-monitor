@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SystemLibrary LANGUAGES CXX)
+project(ProcessMonitorClient LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -10,11 +10,11 @@ message(STATUS "Got root of repository: ${ROOT}")
 
 file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${ROOT}/src/*.cpp")
 
-add_executable(pm-client "${ROOT}/src/main.cpp")
-# target_include_directories(pm-client PRIVATE "${ROOT}/include")
-target_link_libraries(pm-client PRIVATE SystemLibrary)
+add_executable(ProcessMonitorClient "${ROOT}/src/main.cpp")
+target_link_libraries(ProcessMonitorClient PRIVATE ProcessMonitor SystemLibrary)
 
 enable_testing()
 
 add_subdirectory("${ROOT}/extern/googletest")
+add_subdirectory("${ROOT}/process_monitor")
 add_subdirectory("${ROOT}/syslib")

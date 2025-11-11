@@ -7,7 +7,8 @@
                 "ms-azuretools.vscode-docker",
                 "ms-vscode.cmake-tools",
                 "ms-vscode.cpptools",
-                "ms-vscode.cpptools-extension-pack"
+                "ms-vscode.cpptools-extension-pack",
+                "rust-lang.rust-analyzer"
             ],
             "settings": {
                 "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
@@ -19,7 +20,18 @@
                 "extensions.ignoreRecommendations": false,
                 "files.insertFinalNewline": true,
                 "git.autorefresh": true,
-                "git.enabled": true
+                "git.enabled": true,
+                "rust-analyzer.check.overrideCommand": [
+                    "cargo",
+                    "check",
+                    "--message-format=json"
+                ],
+                "rust-analyzer.linkedProjects": [
+                    "${workspaceFolder}/linux-listener/Cargo.toml"
+                ],
+                "rust-analyzer.rustfmt.extraArgs": [
+                    "+nightly"
+                ]
             }
         }
     },
