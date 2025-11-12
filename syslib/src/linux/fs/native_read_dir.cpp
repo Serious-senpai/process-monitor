@@ -9,4 +9,9 @@ namespace _fs_impl
     {
         return _path;
     }
+
+    NativeDirEntry NativeReadDir::begin() const
+    {
+        return NativeDirEntry(opendir(_path.c_str()));
+    }
 }

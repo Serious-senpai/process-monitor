@@ -185,8 +185,7 @@ namespace fs
 
     DirEntry ReadDir::begin() const
     {
-        auto dir = opendir(_inner.path().c_str());
-        return DirEntry(_fs_impl::NativeDirEntry(dir));
+        return DirEntry(_inner.begin());
     }
 
     ReadDir read_dir(path::PathBuf &&path)
