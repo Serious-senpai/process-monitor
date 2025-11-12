@@ -1,3 +1,5 @@
+// Browse kernel source at https://elixir.bootlin.com/linux/latest
+
 #![no_std]
 #![no_main]
 #![feature(adt_const_params)]
@@ -139,6 +141,7 @@ fn _update_io_usage<T: EbpfContext>(
 }
 
 // View probable kernel functions using `sudo cat /proc/kallsyms`.
+// Nah, just look at the kernel source.
 
 #[kretprobe]
 pub fn kretprobe_network_hook(ctx: RetProbeContext) -> u32 {
@@ -171,11 +174,36 @@ pub fn tracepoint_disk_hook(ctx: TracePointContext) -> u32 {
     0
 }
 
+// View LSM hooks at https://elixir.bootlin.com/linux/latest/source/include/linux/lsm_hook_defs.h
+
+// #[lsm]
+// pub fn lsm_task_alloc_hook(ctx: LsmContext) -> i32 {
+//     // LSM_HOOK(int, 0, task_alloc, struct task_struct *task, unsigned long clone_flags)
+//     let retval = ctx.arg::<c_int>(2);
+//     debug!(&ctx, "task_alloc {}", retval);
+//     retval
+// }
+
+#[kretprobe]
+pub fn kretprobe_process_creation(ctx: RetProbeContext) -> u32 {
+    match ctx.command() {
+        Ok(name) => {
+            let name = StaticCommandName(name);
+            if unsafe { NAMES.get(&name) }.is_some() {
+                let key = (name, ctx.pid());
+                let timestamp_ms = unsafe { bpf_ktime_get_ns() / 1_000_000 } & 0xFFFFFFFF;
+                let _ = NETWORK_IO.insert(&key, timestamp_ms << 32, BPF_NOEXIST as _);
+                let _ = DISK_IO.insert(&key, timestamp_ms << 32, BPF_NOEXIST as _);
+            }
+        }
+        Err(e) => {
+            warn!(&ctx, "Failed to call bpf_get_current_comm: {}", e);
+        }
+    }
+    0
+}
+
 #[panic_handler]
 fn panic(_: &PanicInfo) -> ! {
     loop {}
 }
-
-#[unsafe(no_mangle)]
-#[unsafe(link_section = "license")]
-static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0";

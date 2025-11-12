@@ -23,7 +23,7 @@ macro_rules! _try_hook {
     ($hook:expr, $target:expr, $($args:expr),* $(,)?) => {
         $hook
             .attach($target, $($args),+)
-            .inspect_err(|e| warn!("Unable to hook to {}: {e}", $target))
+            .inspect_err(|e| warn!("Unable to hook to {:?}: {e}", $target))
             .is_ok()
     };
 }
@@ -52,6 +52,23 @@ fn attach_tracepoint_disk(hook: &mut TracePoint) -> anyhow::Result<()> {
     hook.load()?;
 
     let _ = _try_hook!(hook, "block", "block_rq_complete");
+
+    Ok(())
+}
+
+// fn attach_lsm_task_alloc(btf: &Btf, hook: &mut Lsm) -> anyhow::Result<()> {
+//     hook.load("task_alloc", btf)?;
+
+//     let _ = _try_hook!(hook);
+
+//     Ok(())
+// }
+
+fn attach_kretprobe_process_creation(hook: &mut KProbe) -> anyhow::Result<()> {
+    hook.load()?;
+
+    let _ = _try_hook!(hook, "__x64_sys_execve", 0);
+    let _ = _try_hook!(hook, "__x64_sys_execveat", 0);
 
     Ok(())
 }
@@ -146,6 +163,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
             "Check the eBPF program again for EVENTS"
         ))?)?;
 
+        // let btf = Btf::from_sys_fs()?;
         attach_kretprobe_network(
             ebpf.program_mut("kretprobe_network_hook")
                 .expect("Check the eBPF program again for kretprobe_network_hook")
@@ -159,6 +177,17 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
         attach_tracepoint_disk(
             ebpf.program_mut("tracepoint_disk_hook")
                 .expect("Check the eBPF program again for tracepoint_disk_hook")
+                .try_into()?,
+        )?;
+        // attach_lsm_task_alloc(
+        //     &btf,
+        //     ebpf.program_mut("lsm_task_alloc_hook")
+        //         .expect("Check the eBPF program again for lsm_task_alloc_hook")
+        //         .try_into()?,
+        // )?;
+        attach_kretprobe_process_creation(
+            ebpf.program_mut("kretprobe_process_creation")
+                .expect("Check the eBPF program again for kretprobe_process_creation")
                 .try_into()?,
         )?;
 
