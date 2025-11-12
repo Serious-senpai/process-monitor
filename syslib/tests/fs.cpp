@@ -157,11 +157,14 @@ TEST(ListDirectory, CreateList)
 
     auto read_dir = fs::read_dir(std::move(dir_path));
     auto entry = read_dir.begin();
+    ASSERT_TRUE(entry.is_ok());
+
+    auto dir_entry = std::move(entry).into_ok();
 
     int file_count = 0;
     while (true)
     {
-        auto next = entry.next();
+        auto next = dir_entry.next();
         ASSERT_TRUE(next.is_ok());
         file_count++;
         if (!next.unwrap())

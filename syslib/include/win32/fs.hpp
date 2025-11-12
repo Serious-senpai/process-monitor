@@ -122,4 +122,30 @@ namespace _fs_impl
     };
 
     io::Result<NativeMetadata> metadata(const path::PathBuf &path);
+
+    class NativeDirEntry : public NonConstructible
+    {
+    private:
+        HANDLE _dir;
+        std::optional<WIN32_FIND_DATAW> _entry;
+
+    public:
+        explicit NativeDirEntry(HANDLE dir, std::optional<WIN32_FIND_DATAW> entry);
+        NativeDirEntry(NativeDirEntry &&other);
+        ~NativeDirEntry();
+
+        io::Result<bool> next();
+    };
+
+    class NativeReadDir : public NonConstructible
+    {
+    private:
+        path::PathBuf _path;
+
+    public:
+        explicit NativeReadDir(path::PathBuf &&path);
+
+        const path::PathBuf &path() const noexcept;
+        io::Result<NativeDirEntry> begin() const;
+    };
 }

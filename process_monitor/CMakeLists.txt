@@ -19,6 +19,7 @@ target_precompile_headers(ProcessMonitor PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${PR
 
 # Rust bindings
 if(WIN32)
+    target_link_libraries(ProcessMonitor PRIVATE "${PROCESS_MONITOR_ROOT}/../windows-listener/target/release/windows_listener.dll")
 elseif(UNIX)
     target_link_libraries(ProcessMonitor PRIVATE "${PROCESS_MONITOR_ROOT}/../linux-listener/target/release/liblinux_listener.so")
 endif()

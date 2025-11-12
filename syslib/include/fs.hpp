@@ -177,7 +177,7 @@ namespace fs
 
     public:
         explicit ReadDir(_fs_impl::NativeReadDir &&inner);
-        DirEntry begin() const;
+        io::Result<DirEntry> begin() const;
     };
 
     ReadDir read_dir(path::PathBuf &&path);

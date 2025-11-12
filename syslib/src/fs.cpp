@@ -183,9 +183,10 @@ namespace fs
     ReadDir::ReadDir(_fs_impl::NativeReadDir &&inner)
         : NonConstructible(NonConstructibleTag::TAG), _inner(std::move(inner)) {}
 
-    DirEntry ReadDir::begin() const
+    io::Result<DirEntry> ReadDir::begin() const
     {
-        return DirEntry(_inner.begin());
+        auto entry = SHORT_CIRCUIT(DirEntry, _inner.begin());
+        return io::Result<DirEntry>::ok(DirEntry(std::move(entry)));
     }
 
     ReadDir read_dir(path::PathBuf &&path)
