@@ -1,35 +1,11 @@
 #pragma once
 
-#include "pch.hpp"
+#include "types.hpp"
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
-
-    struct Threshold
-    {
-        uint32_t threshold[4];
-    };
-
-    enum Metric : unsigned char
-    {
-        CPU = 0,
-        MEMORY = 1,
-        DISK = 2,
-        NETWORK = 3
-    };
-
-    struct Violation
-    {
-        uint32_t pid;
-        char name[16];
-        Metric metric;
-        uint32_t value;
-        uint32_t threshold;
-    };
-
-    struct KernelTracerHandle;
 
     int initialize_logger();
     int set_log_level(const int level);

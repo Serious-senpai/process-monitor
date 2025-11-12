@@ -1,10 +1,9 @@
 #[cfg(feature = "std")]
 use aya::Pod;
 use aya_ebpf::TASK_COMM_LEN;
-use serde::{Deserialize, Serialize};
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug)]
 pub struct Threshold {
     pub thresholds: [u32; 4],
 }
@@ -13,7 +12,7 @@ pub struct Threshold {
 unsafe impl Pod for Threshold {}
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Metric {
     Cpu,
     Memory,
@@ -22,7 +21,7 @@ pub enum Metric {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug)]
 pub struct StaticCommandName(pub [u8; TASK_COMM_LEN]);
 
 #[cfg(feature = "std")]
@@ -41,7 +40,7 @@ impl From<&str> for StaticCommandName {
 }
 
 #[repr(C)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Violation {
     pub pid: u32,
     pub name: StaticCommandName,

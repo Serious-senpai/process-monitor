@@ -11,8 +11,6 @@ crate-type = ["cdylib"]
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
 aya-log = { workspace = true }
-clap = { workspace = true, features = ["derive", "error-context", "help", "std"] }
-ctor = { workspace = true, features = ["dtor", "proc_macro"] }
 libc = { workspace = true }
 linux-listener-common = { path = "../linux-listener-common", features = ["std"] }
 log = { workspace = true }

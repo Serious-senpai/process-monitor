@@ -11,7 +11,6 @@ std = ["aya"]
 [dependencies]
 aya = { workspace = true, optional = true }
 aya-ebpf = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 
 [lints]
 workspace = true

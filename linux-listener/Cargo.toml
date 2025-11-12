@@ -19,11 +19,8 @@ aya-ebpf = { git = "https://github.com/aya-rs/aya", default-features = false }
 aya-log = { git = "https://github.com/aya-rs/aya", default-features = false }
 aya-log-ebpf = { git = "https://github.com/aya-rs/aya", default-features = false }
 cargo_metadata = { version = "0.23.0", default-features = false }
-clap = { version = "4.5.51", default-features = false }
-ctor = { version = "0.6.1", default-features = false }
 libc = { version = "0.2.177", default-features = false }
 log = { version = "0.4.22", default-features = false }
-serde = { version = "1.0.228", default-features = false }
 simplelog = { version = "0.12.2", default-features = false }
 which = { version = "6.0.0", default-features = false }
 
