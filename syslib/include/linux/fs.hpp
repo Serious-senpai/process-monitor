@@ -127,6 +127,6 @@ namespace _fs_impl
         explicit NativeReadDir(path::PathBuf &&path);
 
         const path::PathBuf &path() const noexcept;
-        NativeDirEntry begin() const;
+        io::Result<NativeDirEntry> begin() const;
     };
 }

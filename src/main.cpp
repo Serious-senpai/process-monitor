@@ -4,7 +4,7 @@
 
 int main(int argc, char **argv)
 {
-    if (initialize_logger() || set_log_level(3))
+    if (initialize_logger() || set_log_level(4))
     {
         std::cerr << "Failed to initialize logger." << std::endl;
         return 1;

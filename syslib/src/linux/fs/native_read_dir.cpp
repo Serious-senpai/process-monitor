@@ -10,8 +10,8 @@ namespace _fs_impl
         return _path;
     }
 
-    NativeDirEntry NativeReadDir::begin() const
+    io::Result<NativeDirEntry> NativeReadDir::begin() const
     {
-        return NativeDirEntry(opendir(_path.c_str()));
+        return io::Result<NativeDirEntry>::ok(NativeDirEntry(opendir(_path.c_str())));
     }
 }

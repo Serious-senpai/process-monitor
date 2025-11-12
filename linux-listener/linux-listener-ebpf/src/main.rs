@@ -13,7 +13,7 @@ use aya_ebpf::helpers::bpf_ktime_get_ns;
 use aya_ebpf::macros::{kretprobe, map, tracepoint};
 use aya_ebpf::maps::{HashMap, LruHashMap, RingBuf};
 use aya_ebpf::programs::{RetProbeContext, TracePointContext};
-use aya_log_ebpf::warn;
+use aya_log_ebpf::{debug, warn};
 use linux_listener_common::config::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
 use linux_listener_common::types::{Metric, StaticCommandName, Threshold, Violation};
 
@@ -80,6 +80,15 @@ fn _update_io_usage<T: EbpfContext>(
                 let pid = ctx.pid();
                 let threshold = threshold.thresholds[metric as usize];
                 let timestamp_ms = unsafe { bpf_ktime_get_ns() / 1_000_000 } & 0xFFFFFFFF;
+                debug!(
+                    &ctx,
+                    "Received metric event {} from PID {}: size = {}, threshold = {}, timestamp_ms = {}",
+                    metric as u8,
+                    pid,
+                    size,
+                    threshold,
+                    timestamp_ms
+                );
 
                 match map.get_ptr_mut(&(name, pid)) {
                     Some(packed) => {
@@ -92,7 +101,7 @@ fn _update_io_usage<T: EbpfContext>(
                                 timestamp_ms << 32,
                             );
                             let transfered = old & 0xFFFFFFFF;
-                            let rate = (1_000 * transfered / dt) as u32;
+                            let rate = ((1_000 * transfered / dt) & 0xFFFFFFFF) as u32;
 
                             if rate >= threshold {
                                 match EVENTS.reserve::<Violation>(0) {
@@ -133,7 +142,7 @@ fn _update_io_usage<T: EbpfContext>(
 
 #[kretprobe]
 pub fn kretprobe_network_hook(ctx: RetProbeContext) -> u32 {
-    let size = (ctx.ret::<i32>() as u64) & 0xFFFFFFFF;
+    let size = ctx.ret::<i32>().clamp(0, i32::MAX) as u64 & 0xFFFFFFFF;
     if size == 0 {
         return 0;
     }
@@ -152,7 +161,7 @@ pub fn kretprobe_network_hook(ctx: RetProbeContext) -> u32 {
 
 #[tracepoint]
 pub fn tracepoint_disk_hook(ctx: TracePointContext) -> u32 {
-    let nr_sector = unsafe { ctx.read_at::<u64>(16) }.unwrap_or_default();
+    let nr_sector = u64::from(unsafe { ctx.read_at::<u32>(24) }.unwrap_or_default());
     if nr_sector == 0 {
         return 0;
     }
