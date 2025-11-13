@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent.resolve()
 
+# Create VSCode settings
 VSCODE = ROOT / ".vscode"
 VSCODE.mkdir(parents=True, exist_ok=True)
 
@@ -40,3 +41,17 @@ with VSCODE_SETTINGS.open("w", encoding="utf-8") as writer:
         raise RuntimeError(f"Unsupported platform {sys.platform!r}")
 
     json.dump(settings, writer, indent=4)
+
+# Modify environment variables
+if sys.platform == "win32":
+    run = ROOT / "run.bat"
+
+    with run.open("w", encoding="utf-8") as writer:
+        writer.write("@echo off\n")
+        writer.write(f"cd /d {ROOT}\n")
+
+        writer.write(f"set LIBCLANG_PATH=")
+        writer.write(str(ROOT / "extern" / "clang-llvm-21.1.3"))
+        writer.write("\n")
+
+        writer.write("cmd\n")

@@ -1,56 +1,142 @@
-use std::ffi::{c_char, c_int, c_void};
+#![no_std]
 
-// Placeholder
-type Threshold = c_void;
-type Violation = c_void;
+extern crate alloc;
 
-pub struct KernelTracerHandle {
-    _private: [u8; 0],
+mod config;
+mod displayer;
+mod error;
+mod handlers;
+mod log;
+mod state;
+mod wrappers;
+
+// #[cfg(not(test))]
+extern crate wdk_panic;
+
+// #[cfg(not(test))]
+use wdk_alloc::WdkAllocator;
+use wdk_sys::ntddk::IofCompleteRequest;
+use wdk_sys::{
+    IO_NO_INCREMENT, NTSTATUS, PCUNICODE_STRING, PDEVICE_OBJECT, PDRIVER_OBJECT, PIRP,
+    STATUS_INVALID_PARAMETER, STATUS_SUCCESS, STATUS_UNSUCCESSFUL,
+};
+
+use crate::error::RuntimeError;
+use crate::state::DeviceExtension;
+use crate::wrappers::bindings::IoGetCurrentIrpStackLocation;
+use crate::wrappers::strings::UnicodeString;
+
+// #[cfg(not(test))]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: WdkAllocator = WdkAllocator;
+
+/// # Safety
+/// Must be called by the OS.
+unsafe extern "C" fn driver_unload(driver: PDRIVER_OBJECT) {
+    let driver = match unsafe { driver.as_mut() } {
+        Some(d) => d,
+        None => {
+            log!("driver_unload: PDRIVER_OBJECT is null");
+            return;
+        }
+    };
+
+    if let Err(e) = handlers::driver_unload(driver) {
+        log!("Error when unloading driver: {e}");
+    }
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn initialize_logger() -> c_int {
-    todo!()
+/// # Safety
+/// Must be called by the OS. Because IRP handlers may be run concurrently, we provide
+/// shared state (e.g. [`DeviceExtension`]) as immutable references.
+unsafe extern "C" fn irp_handler(device: PDEVICE_OBJECT, irp: PIRP) -> NTSTATUS {
+    let device = match unsafe { device.as_ref() } {
+        Some(d) => d,
+        None => {
+            log!("irp_handler: PDEVICE_OBJECT is null");
+            return STATUS_INVALID_PARAMETER;
+        }
+    };
+
+    let extension = match unsafe {
+        let ptr = device.DeviceExtension as *mut DeviceExtension;
+        ptr.as_ref()
+    } {
+        Some(ext) => ext,
+        None => {
+            log!("irp_handler: DeviceExtension is null");
+            return STATUS_INVALID_PARAMETER;
+        }
+    };
+
+    let irp = match unsafe { irp.as_mut() } {
+        Some(i) => i,
+        None => {
+            log!("irp_handler: PIRP is null");
+            return STATUS_INVALID_PARAMETER;
+        }
+    };
+
+    let irpsp = match unsafe { IoGetCurrentIrpStackLocation(irp).as_mut() } {
+        Some(s) => s,
+        None => {
+            log!("irp_handler: Failed to call IoGetCurrentIrpStackLocation");
+            return STATUS_INVALID_PARAMETER;
+        }
+    };
+
+    log!("Received IRP {}", irpsp.MajorFunction);
+
+    let status = match handlers::irp_handler(device, extension, irp, irpsp) {
+        Ok(()) => STATUS_SUCCESS,
+        Err(e) => {
+            log!("Error when handling IRP: {e}");
+            match e {
+                RuntimeError::Failure(status) => status,
+                _ => STATUS_UNSUCCESSFUL,
+            }
+        }
+    };
+
+    irp.IoStatus.__bindgen_anon_1.Status = status;
+    unsafe {
+        IofCompleteRequest(irp, IO_NO_INCREMENT as _);
+    }
+
+    status
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_log_level(level: c_int) -> c_int {
-    todo!()
-}
+/// # Safety
+/// Must be called by the OS.
+#[unsafe(export_name = "DriverEntry")]
+pub unsafe extern "C" fn driver_entry(
+    driver: PDRIVER_OBJECT,
+    registry_path: PCUNICODE_STRING,
+) -> NTSTATUS {
+    let driver = match unsafe { driver.as_mut() } {
+        Some(d) => d,
+        None => {
+            log!("driver_entry: PDRIVER_OBJECT is null");
+            return STATUS_INVALID_PARAMETER;
+        }
+    };
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
-    todo!()
-}
+    let registry_path = match unsafe { UnicodeString::from_raw(registry_path) } {
+        Ok(r) => r,
+        Err(e) => {
+            log!("driver_entry: failed to parse registry path: {e}");
+            return STATUS_INVALID_PARAMETER;
+        }
+    };
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn free_tracer(tracer: *mut KernelTracerHandle) {
-    todo!()
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_monitor(
-    tracer: *const KernelTracerHandle,
-    name: *const c_char,
-    threshold: *const Threshold,
-) -> c_int {
-    todo!()
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_int {
-    todo!()
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn next_event(
-    tracer: *const KernelTracerHandle,
-    timeout_ms: c_int,
-) -> *mut Violation {
-    todo!()
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn drop_event(event: *mut Violation) {
-    todo!()
+    match handlers::driver_entry(driver, registry_path, driver_unload, irp_handler) {
+        Ok(()) => STATUS_SUCCESS,
+        Err(e) => {
+            log!("Error when loading driver: {e}");
+            match e {
+                RuntimeError::Failure(status) => status,
+                _ => STATUS_UNSUCCESSFUL,
+            }
+        }
+    }
 }
