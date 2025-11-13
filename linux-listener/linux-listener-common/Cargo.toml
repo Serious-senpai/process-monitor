@@ -6,7 +6,8 @@ license.workspace = true
 
 [features]
 default = []
-std = ["aya"]
+std = []
+aya = ["dep:aya", "std"]
 
 [dependencies]
 aya = { workspace = true, optional = true }

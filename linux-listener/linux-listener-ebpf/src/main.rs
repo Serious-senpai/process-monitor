@@ -16,8 +16,8 @@ use aya_ebpf::macros::{kretprobe, map, tracepoint};
 use aya_ebpf::maps::{HashMap, LruHashMap, RingBuf};
 use aya_ebpf::programs::{RetProbeContext, TracePointContext};
 use aya_log_ebpf::{debug, warn};
-use linux_listener_common::config::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
-use linux_listener_common::types::{Metric, StaticCommandName, Threshold, Violation};
+use linux_listener_common::linux::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
+use linux_listener_common::{Metric, StaticCommandName, Threshold, Violation};
 
 #[map]
 static NAMES: HashMap<StaticCommandName, Threshold> =
@@ -36,7 +36,10 @@ static DISK_IO: LruHashMap<(StaticCommandName, u32), u64> =
     LruHashMap::with_max_entries(MAX_PROCESS_COUNT, 0);
 
 #[map]
-static EVENTS: RingBuf = RingBuf::with_byte_size(RING_BUFFER_SIZE, 0);
+static VIOLATIONS: RingBuf = RingBuf::with_byte_size(RING_BUFFER_SIZE, 0);
+
+#[map]
+static NEW_PROCESSES: RingBuf = RingBuf::with_byte_size(RING_BUFFER_SIZE, 0);
 
 struct _Atomic<T: Copy> {
     _ptr: *mut T,
@@ -82,15 +85,6 @@ fn _update_io_usage<T: EbpfContext>(
                 let pid = ctx.pid();
                 let threshold = threshold.thresholds[metric as usize];
                 let timestamp_ms = unsafe { bpf_ktime_get_ns() / 1_000_000 } & 0xFFFFFFFF;
-                debug!(
-                    &ctx,
-                    "Received metric event {} from PID {}: size = {}, threshold = {}, timestamp_ms = {}",
-                    metric as u8,
-                    pid,
-                    size,
-                    threshold,
-                    timestamp_ms
-                );
 
                 match map.get_ptr_mut(&(name, pid)) {
                     Some(packed) => {
@@ -102,11 +96,22 @@ fn _update_io_usage<T: EbpfContext>(
                             let old = atomic.swap::<{ intrinsics::AtomicOrdering::Release }>(
                                 timestamp_ms << 32,
                             );
-                            let transfered = old & 0xFFFFFFFF;
-                            let rate = ((1_000 * transfered / dt) & 0xFFFFFFFF) as u32;
+                            let accumulated = old & 0xFFFFFFFF;
+                            debug!(
+                                &ctx,
+                                "Received metric event {} from PID {}: size = {}, accumulated = {}, dt = {} ms, threshold = {}, timestamp_ms = {}",
+                                metric as u8,
+                                pid,
+                                size,
+                                accumulated,
+                                dt,
+                                threshold,
+                                timestamp_ms
+                            );
+                            let rate = ((1_000 * accumulated / dt) & 0xFFFFFFFF) as u32;
 
                             if rate >= threshold {
-                                match EVENTS.reserve::<Violation>(0) {
+                                match VIOLATIONS.reserve::<Violation>(0) {
                                     Some(mut entry) => {
                                         entry.write(Violation {
                                             pid,
@@ -194,6 +199,16 @@ pub fn kretprobe_process_creation(ctx: RetProbeContext) -> u32 {
                 let timestamp_ms = unsafe { bpf_ktime_get_ns() / 1_000_000 } & 0xFFFFFFFF;
                 let _ = NETWORK_IO.insert(&key, timestamp_ms << 32, BPF_NOEXIST as _);
                 let _ = DISK_IO.insert(&key, timestamp_ms << 32, BPF_NOEXIST as _);
+
+                match NEW_PROCESSES.reserve::<(StaticCommandName, u32)>(0) {
+                    Some(mut entry) => {
+                        entry.write(key);
+                        entry.submit(0);
+                    }
+                    None => {
+                        warn!(&ctx, "Failed to reserve space in ring buffer");
+                    }
+                }
             }
         }
         Err(e) => {

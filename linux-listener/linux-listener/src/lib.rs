@@ -9,7 +9,7 @@ use aya::Ebpf;
 use aya::maps::{HashMap, MapData, RingBuf};
 use aya::programs::{KProbe, TracePoint};
 use aya_log::EbpfLogger;
-use linux_listener_common::types::{StaticCommandName, Threshold, Violation};
+use linux_listener_common::{StaticCommandName, Threshold, Violation};
 use log::{LevelFilter, debug, error, warn};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 
@@ -76,7 +76,8 @@ fn attach_kretprobe_process_creation(hook: &mut KProbe) -> anyhow::Result<()> {
 pub struct KernelTracer {
     pub ebpf: Mutex<Ebpf>,
     pub names: Mutex<HashMap<MapData, StaticCommandName, Threshold>>,
-    pub events: Mutex<RingBuf<MapData>>,
+    pub violations: Mutex<RingBuf<MapData>>,
+    pub new_processes: Mutex<RingBuf<MapData>>,
 
     pub stopped: Arc<AtomicBool>,
     pub logger_thread: Option<thread::JoinHandle<()>>,
@@ -87,29 +88,7 @@ pub struct KernelTracerHandle {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn initialize_logger() -> c_int {
-    let cfg = ConfigBuilder::new()
-        .set_location_level(LevelFilter::Off)
-        .set_time_offset_to_local()
-        .unwrap_or_else(|e| e)
-        .build();
-
-    // Linux will reclaim the leaked memory when our library is unloaded.
-    if let Err(e) = TermLogger::init(
-        LevelFilter::Trace,
-        cfg,
-        TerminalMode::Stderr,
-        ColorChoice::Auto,
-    ) {
-        eprintln!("Failed to initialize logger: {e}");
-        return 1;
-    }
-
-    0
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_log_level(level: c_int) -> c_int {
+pub unsafe extern "C" fn initialize_logger(level: c_int) -> c_int {
     let filter = match level {
         0 => LevelFilter::Off,
         1 => LevelFilter::Error,
@@ -119,8 +98,18 @@ pub unsafe extern "C" fn set_log_level(level: c_int) -> c_int {
         5 => LevelFilter::Trace,
         _ => return 1,
     };
+    let cfg = ConfigBuilder::new()
+        .set_location_level(LevelFilter::Off)
+        .set_time_offset_to_local()
+        .unwrap_or_else(|e| e)
+        .build();
 
-    log::set_max_level(filter);
+    // Linux will reclaim the leaked memory when our library is unloaded.
+    if let Err(e) = TermLogger::init(filter, cfg, TerminalMode::Stderr, ColorChoice::Auto) {
+        eprintln!("Failed to initialize logger: {e}");
+        return 1;
+    }
+
     0
 }
 
@@ -153,16 +142,6 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
             }
         };
 
-        let names = HashMap::<MapData, StaticCommandName, Threshold>::try_from(
-            ebpf.take_map("NAMES").ok_or(anyhow::format_err!(
-                "Check the eBPF program again for NAMES"
-            ))?,
-        )?;
-
-        let events = RingBuf::try_from(ebpf.take_map("EVENTS").ok_or(anyhow::format_err!(
-            "Check the eBPF program again for EVENTS"
-        ))?)?;
-
         // let btf = Btf::from_sys_fs()?;
         attach_kretprobe_network(
             ebpf.program_mut("kretprobe_network_hook")
@@ -191,11 +170,24 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
                 .try_into()?,
         )?;
 
+        let names = HashMap::<MapData, StaticCommandName, Threshold>::try_from(
+            ebpf.take_map("NAMES").ok_or(anyhow::format_err!(
+                "Check the eBPF program again for NAMES"
+            ))?,
+        )?;
+        let violations = RingBuf::try_from(ebpf.take_map("VIOLATIONS").ok_or(
+            anyhow::format_err!("Check the eBPF program again for VIOLATIONS"),
+        )?)?;
+        let new_processes = RingBuf::try_from(ebpf.take_map("NEW_PROCESSES").ok_or(
+            anyhow::format_err!("Check the eBPF program again for NEW_PROCESSES"),
+        )?)?;
+
         debug!("Completed loading eBPF program");
         Ok(KernelTracer {
             ebpf: Mutex::new(ebpf),
             names: Mutex::new(names),
-            events: Mutex::new(events),
+            violations: Mutex::new(violations),
+            new_processes: Mutex::new(new_processes),
             stopped,
             logger_thread,
         })
@@ -297,18 +289,16 @@ pub unsafe extern "C" fn next_event(
 ) -> *mut Violation {
     let tracer = tracer as *const KernelTracer;
     if let Some(tracer) = unsafe { tracer.as_ref() }
-        && let Ok(mut events) = tracer.events.lock()
+        && let Ok(mut violations) = tracer.violations.lock()
     {
         let mut poll_fd = libc::pollfd {
-            fd: events.as_fd().as_raw_fd(),
+            fd: violations.as_fd().as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         };
 
-        debug!("Polling events with timeout {timeout_ms} ms");
         if unsafe { libc::poll(&mut poll_fd as *mut _, 1, timeout_ms) } > 0 {
-            if let Some(item) = events.next() {
-                debug!("Got item {item:?}");
+            if let Some(item) = violations.next() {
                 let violation = unsafe { ptr::read_unaligned(item.as_ptr() as *const _) };
                 return Box::into_raw(Box::new(violation));
             }

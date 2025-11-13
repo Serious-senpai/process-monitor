@@ -7,8 +7,7 @@ extern "C"
 {
 #endif
 
-    int initialize_logger();
-    int set_log_level(const int level);
+    int initialize_logger(const int level);
     struct KernelTracerHandle *new_tracer();
     void free_tracer(struct KernelTracerHandle const *const tracer);
     int set_monitor(
