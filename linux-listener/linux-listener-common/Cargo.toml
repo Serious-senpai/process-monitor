@@ -15,7 +15,7 @@ aya-ebpf = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }
-cbindgen = "0.29.2"
+cbindgen = { workspace = true }
 
 [lints]
 workspace = true

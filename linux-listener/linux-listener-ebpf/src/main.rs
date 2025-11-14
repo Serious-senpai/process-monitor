@@ -17,7 +17,9 @@ use aya_ebpf::maps::{HashMap, LruHashMap, RingBuf};
 use aya_ebpf::programs::{RetProbeContext, TracePointContext};
 use aya_log_ebpf::{debug, warn};
 use linux_listener_common::linux::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
-use linux_listener_common::{Metric, StaticCommandName, Threshold, Violation};
+use linux_listener_common::{
+    Event, EventData, EventType, Metric, NewProcess, StaticCommandName, Threshold, Violation,
+};
 
 #[map]
 static NAMES: HashMap<StaticCommandName, Threshold> =
@@ -36,10 +38,7 @@ static DISK_IO: LruHashMap<(StaticCommandName, u32), u64> =
     LruHashMap::with_max_entries(MAX_PROCESS_COUNT, 0);
 
 #[map]
-static VIOLATIONS: RingBuf = RingBuf::with_byte_size(RING_BUFFER_SIZE, 0);
-
-#[map]
-static NEW_PROCESSES: RingBuf = RingBuf::with_byte_size(RING_BUFFER_SIZE, 0);
+static EVENTS: RingBuf = RingBuf::with_byte_size(RING_BUFFER_SIZE, 0);
 
 struct _Atomic<T: Copy> {
     _ptr: *mut T,
@@ -111,14 +110,19 @@ fn _update_io_usage<T: EbpfContext>(
                             let rate = ((1_000 * accumulated / dt) & 0xFFFFFFFF) as u32;
 
                             if rate >= threshold {
-                                match VIOLATIONS.reserve::<Violation>(0) {
+                                match EVENTS.reserve::<Event>(0) {
                                     Some(mut entry) => {
-                                        entry.write(Violation {
+                                        entry.write(Event {
                                             pid,
                                             name,
-                                            metric,
-                                            value: rate,
-                                            threshold,
+                                            variant: EventType::Violation,
+                                            data: EventData {
+                                                violation: Violation {
+                                                    metric,
+                                                    value: rate,
+                                                    threshold,
+                                                },
+                                            },
                                         });
                                         entry.submit(0);
                                     }
@@ -195,14 +199,22 @@ pub fn kretprobe_process_creation(ctx: RetProbeContext) -> u32 {
         Ok(name) => {
             let name = StaticCommandName(name);
             if unsafe { NAMES.get(&name) }.is_some() {
-                let key = (name, ctx.pid());
+                let pid = ctx.pid();
+                let key = (name, pid);
                 let timestamp_ms = unsafe { bpf_ktime_get_ns() / 1_000_000 } & 0xFFFFFFFF;
                 let _ = NETWORK_IO.insert(&key, timestamp_ms << 32, BPF_NOEXIST as _);
                 let _ = DISK_IO.insert(&key, timestamp_ms << 32, BPF_NOEXIST as _);
 
-                match NEW_PROCESSES.reserve::<(StaticCommandName, u32)>(0) {
+                match EVENTS.reserve::<Event>(0) {
                     Some(mut entry) => {
-                        entry.write(key);
+                        entry.write(Event {
+                            pid,
+                            name,
+                            variant: EventType::NewProcess,
+                            data: EventData {
+                                new_process: NewProcess {},
+                            },
+                        });
                         entry.submit(0);
                     }
                     None => {

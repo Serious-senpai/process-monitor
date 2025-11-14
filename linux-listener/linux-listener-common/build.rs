@@ -15,6 +15,7 @@ fn main() -> anyhow::Result<()> {
         .with_tab_width(4)
         .with_braces(cbindgen::Braces::NextLine)
         .with_cpp_compat(true)
+        .with_documentation(true)
         // .with_parse_deps(true)
         .with_pragma_once(true)
         .with_no_includes()
@@ -23,7 +24,7 @@ fn main() -> anyhow::Result<()> {
         .include_item("Threshold")
         .include_item("Metric")
         .include_item("StaticCommandName")
-        .include_item("Violation")
+        .include_item("Event")
         .generate()?
         .write_to_file(headers_dir.join("types.hpp"));
 

@@ -1,4 +1,6 @@
-use std::ffi::{CStr, c_char, c_int};
+pub mod epoll;
+
+use std::ffi::{CStr, c_char, c_int, c_short};
 use std::os::fd::{AsFd, AsRawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,7 +11,7 @@ use aya::Ebpf;
 use aya::maps::{HashMap, MapData, RingBuf};
 use aya::programs::{KProbe, TracePoint};
 use aya_log::EbpfLogger;
-use linux_listener_common::{StaticCommandName, Threshold, Violation};
+use linux_listener_common::{Event, StaticCommandName, Threshold};
 use log::{LevelFilter, debug, error, warn};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 
@@ -76,8 +78,7 @@ fn attach_kretprobe_process_creation(hook: &mut KProbe) -> anyhow::Result<()> {
 pub struct KernelTracer {
     pub ebpf: Mutex<Ebpf>,
     pub names: Mutex<HashMap<MapData, StaticCommandName, Threshold>>,
-    pub violations: Mutex<RingBuf<MapData>>,
-    pub new_processes: Mutex<RingBuf<MapData>>,
+    pub events: Mutex<RingBuf<MapData>>,
 
     pub stopped: Arc<AtomicBool>,
     pub logger_thread: Option<thread::JoinHandle<()>>,
@@ -87,6 +88,8 @@ pub struct KernelTracerHandle {
     _private: [u8; 0],
 }
 
+/// # Safety
+/// This function is just marked as `unsafe` because it is exposed via `extern "C"`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn initialize_logger(level: c_int) -> c_int {
     let filter = match level {
@@ -113,6 +116,8 @@ pub unsafe extern "C" fn initialize_logger(level: c_int) -> c_int {
     0
 }
 
+/// # Safety
+/// This function is just marked as `unsafe` because it is exposed via `extern "C"`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
     fn _new_tracer_inner() -> Result<KernelTracer, anyhow::Error> {
@@ -175,19 +180,15 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
                 "Check the eBPF program again for NAMES"
             ))?,
         )?;
-        let violations = RingBuf::try_from(ebpf.take_map("VIOLATIONS").ok_or(
-            anyhow::format_err!("Check the eBPF program again for VIOLATIONS"),
-        )?)?;
-        let new_processes = RingBuf::try_from(ebpf.take_map("NEW_PROCESSES").ok_or(
-            anyhow::format_err!("Check the eBPF program again for NEW_PROCESSES"),
-        )?)?;
+        let events = RingBuf::try_from(ebpf.take_map("EVENTS").ok_or(anyhow::format_err!(
+            "Check the eBPF program again for EVENTS"
+        ))?)?;
 
         debug!("Completed loading eBPF program");
         Ok(KernelTracer {
             ebpf: Mutex::new(ebpf),
             names: Mutex::new(names),
-            violations: Mutex::new(violations),
-            new_processes: Mutex::new(new_processes),
+            events: Mutex::new(events),
             stopped,
             logger_thread,
         })
@@ -202,10 +203,13 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
     }
 }
 
+/// # Safety
+/// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn free_tracer(tracer: *mut KernelTracerHandle) {
+    let tracer = tracer as *mut KernelTracer;
     if !tracer.is_null() {
-        let tracer = unsafe { Box::from_raw(tracer as *mut KernelTracer) };
+        let tracer = unsafe { Box::from_raw(tracer) };
         tracer.stopped.store(true, Ordering::Relaxed);
         if let Some(logger_thread) = tracer.logger_thread {
             let _ = logger_thread.join();
@@ -213,6 +217,11 @@ pub unsafe extern "C" fn free_tracer(tracer: *mut KernelTracerHandle) {
     }
 }
 
+/// # Safety
+/// All of the following conditions must be true:
+/// - `tracer` must be null or a valid pointer obtained from [`new_tracer`].
+/// - `name` must be null or a valid null-terminated string.
+/// - `threshold` must be null or a valid pointer to a [`Threshold`] structure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_monitor(
     tracer: *const KernelTracerHandle,
@@ -230,7 +239,7 @@ pub unsafe extern "C" fn set_monitor(
     {
         match tracer.names.lock() {
             Ok(mut names) => {
-                if let Err(e) = names.insert(&name.into(), threshold, 0) {
+                if let Err(e) = names.insert(StaticCommandName::from(name), threshold, 0) {
                     error!("Failed to insert key {name:?}: {e}");
                     1
                 } else {
@@ -247,6 +256,8 @@ pub unsafe extern "C" fn set_monitor(
     }
 }
 
+/// # Safety
+/// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_int {
     let tracer = tracer as *const KernelTracer;
@@ -282,25 +293,31 @@ pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_i
     }
 }
 
+/// # Safety
+/// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn next_event(
     tracer: *const KernelTracerHandle,
     timeout_ms: c_int,
-) -> *mut Violation {
+) -> *mut Event {
     let tracer = tracer as *const KernelTracer;
     if let Some(tracer) = unsafe { tracer.as_ref() }
-        && let Ok(mut violations) = tracer.violations.lock()
+        && let Ok(mut events) = tracer.events.lock()
     {
         let mut poll_fd = libc::pollfd {
-            fd: violations.as_fd().as_raw_fd(),
+            fd: events.as_fd().as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         };
 
-        if unsafe { libc::poll(&mut poll_fd as *mut _, 1, timeout_ms) } > 0 {
-            if let Some(item) = violations.next() {
-                let violation = unsafe { ptr::read_unaligned(item.as_ptr() as *const _) };
-                return Box::into_raw(Box::new(violation));
+        if unsafe { libc::poll(&mut poll_fd, 1, timeout_ms) } > 0 {
+            const ERROR_CONDITION: c_short = libc::POLLERR | libc::POLLHUP | libc::POLLNVAL;
+            if (poll_fd.revents & ERROR_CONDITION) == 0
+                && (poll_fd.revents & libc::POLLIN) != 0
+                && let Some(item) = events.next()
+            {
+                let event = unsafe { ptr::read_unaligned(item.as_ptr() as *const Event) };
+                return Box::into_raw(Box::new(event));
             }
         }
     }
@@ -308,8 +325,10 @@ pub unsafe extern "C" fn next_event(
     ptr::null_mut()
 }
 
+/// # Safety
+/// The provided pointer must be null or a valid pointer obtained from [`next_event`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn drop_event(event: *mut Violation) {
+pub unsafe extern "C" fn drop_event(event: *mut Event) {
     if !event.is_null() {
         let _ = unsafe { Box::from_raw(event) };
     }

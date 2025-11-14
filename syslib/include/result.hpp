@@ -78,18 +78,5 @@ namespace result
             }
             return std::get<E>(_data);
         }
-
-        template <typename FT, typename FE>
-        std::variant<std::invoke_result_t<FT, T &>, std::invoke_result_t<FE, E &>> match(FT &&on_ok, FE &&on_err)
-        {
-            if (is_ok())
-            {
-                return std::invoke(std::forward<FT>(on_ok), std::get<T>(_data));
-            }
-            else
-            {
-                return std::invoke(std::forward<FE>(on_err), std::get<E>(_data));
-            }
-        }
     };
 }
