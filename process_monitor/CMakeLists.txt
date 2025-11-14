@@ -14,7 +14,12 @@ file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${PROCESS_MONITOR_ROOT}/src/*.c
 message(STATUS "List of source files for library: ${LIB_SOURCES}")
 
 add_library(ProcessMonitor "${LIB_SOURCES}")
-target_include_directories(ProcessMonitor PUBLIC "${PROCESS_MONITOR_ROOT}/include")
+target_include_directories(
+    ProcessMonitor
+    PUBLIC
+    "${PROCESS_MONITOR_ROOT}/generated"
+    "${PROCESS_MONITOR_ROOT}/include"
+)
 target_precompile_headers(ProcessMonitor PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${PROCESS_MONITOR_ROOT}/include/pch.hpp>")
 
 # Rust bindings

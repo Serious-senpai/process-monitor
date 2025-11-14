@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+/// cbindgen:ignore
 pub mod linux;
 
 use aya_ebpf::TASK_COMM_LEN;

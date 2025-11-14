@@ -18,7 +18,7 @@ int main(int argc, char **argv)
     }
 
     Threshold threshold = {};
-    threshold.threshold[Metric::DISK] = threshold.threshold[Metric::NETWORK] = 0;
+    threshold.thresholds[static_cast<size_t>(Metric::Disk)] = threshold.thresholds[static_cast<size_t>(Metric::Network)] = 0;
     for (int i = 1; i < argc; i++)
     {
         if (set_monitor(tracer, argv[i], &threshold))
@@ -35,7 +35,7 @@ int main(int argc, char **argv)
         if (event != nullptr)
         {
             std::cout << "Violation detected: PID " << event->pid
-                      << ", Name: " << event->name
+                      << ", Name: " << reinterpret_cast<const char *>(event->name)
                       << ", Metric: " << static_cast<int>(event->metric)
                       << ", Value: " << event->value
                       << ", Threshold: " << event->threshold

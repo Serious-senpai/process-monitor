@@ -1,7 +1,10 @@
+use std::env;
+use std::path::PathBuf;
+
 use anyhow::{Context, anyhow};
 use aya_build::Toolchain;
 
-fn main() -> anyhow::Result<()> {
+fn build_ebpf() -> anyhow::Result<()> {
     let cargo_metadata::Metadata { packages, .. } = cargo_metadata::MetadataCommand::new()
         .no_deps()
         .exec()
@@ -26,4 +29,35 @@ fn main() -> anyhow::Result<()> {
     };
 
     aya_build::build_ebpf([ebpf_package], Toolchain::default())
+}
+
+fn generate_c_header() -> anyhow::Result<()> {
+    let linux_listener_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    let headers_dir = linux_listener_dir
+        .join("..")
+        .join("..")
+        .join("process_monitor")
+        .join("generated");
+
+    cbindgen::Builder::new()
+        .with_crate(&linux_listener_dir)
+        .with_language(cbindgen::Language::Cxx)
+        .with_tab_width(4)
+        .with_braces(cbindgen::Braces::NextLine)
+        .with_cpp_compat(true)
+        // .with_parse_deps(true)
+        .with_pragma_once(true)
+        .with_no_includes()
+        .with_include("types.hpp")
+        .generate()?
+        .write_to_file(headers_dir.join("listener.hpp"));
+
+    Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
+    build_ebpf()?;
+    generate_c_header()?;
+
+    Ok(())
 }
