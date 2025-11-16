@@ -10,10 +10,8 @@ mod log;
 mod state;
 mod wrappers;
 
-// #[cfg(not(test))]
 extern crate wdk_panic;
 
-// #[cfg(not(test))]
 use wdk_alloc::WdkAllocator;
 use wdk_sys::ntddk::IofCompleteRequest;
 use wdk_sys::{
@@ -26,7 +24,6 @@ use crate::state::DeviceExtension;
 use crate::wrappers::bindings::IoGetCurrentIrpStackLocation;
 use crate::wrappers::strings::UnicodeString;
 
-// #[cfg(not(test))]
 #[global_allocator]
 static GLOBAL_ALLOCATOR: WdkAllocator = WdkAllocator;
 
