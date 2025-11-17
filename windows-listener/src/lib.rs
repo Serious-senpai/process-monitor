@@ -7,6 +7,7 @@ mod displayer;
 mod error;
 mod handlers;
 mod log;
+mod mpsc;
 mod state;
 mod wrappers;
 

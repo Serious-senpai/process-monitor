@@ -1,6 +1,7 @@
 pub mod bindings;
 pub mod irql;
-pub mod mutex;
+pub mod lock;
 pub mod phantom;
 pub mod safety;
 pub mod strings;
+pub mod user_object;

@@ -1,7 +1,6 @@
-use alloc::collections::VecDeque;
 use core::mem::size_of;
-use core::ptr::{null_mut, write};
-use core::sync::atomic::Ordering;
+use core::ptr;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use wdk_sys::ntddk::IoCreateDevice;
 use wdk_sys::{
@@ -9,14 +8,14 @@ use wdk_sys::{
     FILE_DEVICE_UNKNOWN, IRP, NT_SUCCESS,
 };
 
-use crate::config::{DEVICE_NAME, DOS_NAME, DRIVER, QUEUE_CAPACITY};
+use crate::config::{DEVICE_NAME, DOS_NAME, DRIVER};
 use crate::displayer::ForeignDisplayer;
 use crate::error::RuntimeError;
 use crate::handlers::delete_device;
+use crate::handlers::process_notify::process_notify;
 use crate::log;
-use crate::state::{DeviceExtension, DeviceState};
-use crate::wrappers::mutex::SpinLock;
-use crate::wrappers::safety::create_symbolic_link;
+use crate::state::DeviceExtension;
+use crate::wrappers::safety::{add_create_process_notify, create_symbolic_link};
 use crate::wrappers::strings::UnicodeString;
 
 pub fn driver_entry(
@@ -37,7 +36,7 @@ pub fn driver_entry(
 
     let device_name = UnicodeString::try_from(DEVICE_NAME)?;
 
-    let mut device = null_mut();
+    let mut device = ptr::null_mut();
     let status = unsafe {
         let mut device_name = device_name.native().into_inner();
         IoCreateDevice(
@@ -60,13 +59,10 @@ pub fn driver_entry(
         device.Flags &= !DO_DEVICE_INITIALIZING;
 
         unsafe {
-            write(
+            ptr::write(
                 device.DeviceExtension as *mut DeviceExtension,
                 DeviceExtension {
-                    inner: SpinLock::new(DeviceState {
-                        queue: VecDeque::with_capacity(QUEUE_CAPACITY),
-                        memmap: None,
-                    }),
+                    shared_memory: AtomicPtr::new(ptr::null_mut()),
                 },
             );
         }
@@ -79,9 +75,9 @@ pub fn driver_entry(
 
     DRIVER.store(driver, Ordering::SeqCst);
 
-    // add_create_process_notify(process_notify).inspect_err(|e| {
-    //     log!("Failed to add process notify: {e}");
-    // })?;
+    add_create_process_notify(process_notify).inspect_err(|e| {
+        log!("Failed to add process notify: {e}");
+    })?;
 
     // add_create_thread_notify(thread_notify).inspect_err(|e| {
     //     log!("Failed to add thread notify: {e}");

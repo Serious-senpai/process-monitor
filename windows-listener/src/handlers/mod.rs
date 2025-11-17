@@ -1,6 +1,7 @@
 mod driver_entry;
 mod driver_unload;
 mod irp;
+mod process_notify;
 
 use core::ptr::drop_in_place;
 

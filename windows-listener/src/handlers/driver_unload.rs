@@ -7,7 +7,9 @@ use crate::config::DRIVER;
 use crate::displayer::ForeignDisplayer;
 use crate::error::RuntimeError;
 use crate::handlers::delete_device;
+use crate::handlers::process_notify::process_notify;
 use crate::log;
+use crate::wrappers::safety::remove_create_process_notify;
 
 pub fn driver_unload(driver: &mut DRIVER_OBJECT) -> Result<(), RuntimeError> {
     log!(
@@ -19,9 +21,9 @@ pub fn driver_unload(driver: &mut DRIVER_OBJECT) -> Result<(), RuntimeError> {
     //     log!("Failed to remove thread notify: {e}");
     // })?;
 
-    // remove_create_process_notify(process_notify).inspect_err(|e| {
-    //     log!("Failed to remove process notify: {e}");
-    // })?;
+    remove_create_process_notify(process_notify).inspect_err(|e| {
+        log!("Failed to remove process notify: {e}");
+    })?;
 
     delete_device(driver);
     DRIVER.store(null_mut(), Ordering::SeqCst);
