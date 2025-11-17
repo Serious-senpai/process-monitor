@@ -120,9 +120,11 @@ impl<const N: usize> Channel<N> {
     }
 }
 
+pub type DefaultChannel = Channel<QUEUE_CAPACITY>;
+
 pub struct UserChannelMap {
     _object: UserObjectMap,
-    _channel: *const Channel<QUEUE_CAPACITY>,
+    _channel: *const DefaultChannel,
 }
 
 impl UserChannelMap {
@@ -134,7 +136,7 @@ impl UserChannelMap {
             UserMode.try_into()?,
         )?;
 
-        let mut view_size = size_of::<Channel<QUEUE_CAPACITY>>() as _;
+        let mut view_size = size_of::<DefaultChannel>() as _;
         let mut channel = ptr::null_mut();
 
         let status = unsafe { MmMapViewInSystemSpace(object.get(), &mut channel, &mut view_size) };

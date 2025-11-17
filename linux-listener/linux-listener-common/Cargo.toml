@@ -13,9 +13,5 @@ aya = ["dep:aya", "std"]
 aya = { workspace = true, optional = true }
 aya-ebpf = { workspace = true }
 
-[build-dependencies]
-anyhow = { workspace = true }
-cbindgen = { workspace = true }
-
 [lints]
 workspace = true

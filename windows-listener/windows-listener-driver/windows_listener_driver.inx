@@ -12,7 +12,7 @@ DefaultDestDir = 13
 1 = %DiskId1%,,,""
 
 [SourceDisksFiles]
-windows_listener.sys = 1,,
+windows_listener_driver.sys = 1,,
 
 ; ================= Install section =================
 
@@ -26,7 +26,7 @@ windows_listener.sys = 1,,
 CopyFiles=Drivers_Dir
 
 [Drivers_Dir]
-windows_listener.sys
+windows_listener_driver.sys
 
 ; ================= Service installation =================
 [WindowsListenerDevice.Services]
@@ -37,7 +37,7 @@ DisplayName    = %ServiceDesc%
 ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
 StartType      = 3               ; SERVICE_DEMAND_START - good for development, change to 2 to start on boot
 ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
-ServiceBinary  = %13%\windows_listener.sys
+ServiceBinary  = %13%\windows_listener_driver.sys
 
 ; ================= Strings =================
 [Strings]
