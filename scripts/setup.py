@@ -25,7 +25,9 @@ with VSCODE_SETTINGS.open("w", encoding="utf-8") as writer:
         "git.autorefresh": True,
         "git.enabled": True,
         "rust-analyzer.check.overrideCommand": ["cargo", "check", "--message-format=json"],
-        "rust-analyzer.linkedProjects": [],
+        "rust-analyzer.linkedProjects": [
+            "${workspaceFolder}/common-ffi/Cargo.toml",
+        ],
         "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
     }
 
