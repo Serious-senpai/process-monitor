@@ -109,12 +109,14 @@ namespace _fs_impl
     private:
         DIR *_dir;
         dirent *_entry;
+        path::PathBuf _path;
 
     public:
         explicit NativeDirEntry(DIR *dir);
         NativeDirEntry(NativeDirEntry &&other);
         ~NativeDirEntry();
 
+        const path::PathBuf &path() const noexcept;
         io::Result<bool> next();
     };
 

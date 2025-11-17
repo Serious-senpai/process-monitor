@@ -102,7 +102,7 @@ pub unsafe extern "C" fn initialize_logger(level: c_int) -> c_int {
         _ => return 1,
     };
     let cfg = ConfigBuilder::new()
-        .set_location_level(LevelFilter::Off)
+        .set_location_level(filter)
         .set_time_offset_to_local()
         .unwrap_or_else(|e| e)
         .build();

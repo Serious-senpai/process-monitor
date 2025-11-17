@@ -167,6 +167,8 @@ namespace fs
 
     public:
         explicit DirEntry(_fs_impl::NativeDirEntry &&inner);
+
+        const path::PathBuf &path() const;
         io::Result<bool> next();
     };
 

@@ -175,6 +175,11 @@ namespace fs
     DirEntry::DirEntry(_fs_impl::NativeDirEntry &&inner)
         : NonConstructible(NonConstructibleTag::TAG), _inner(std::move(inner)) {}
 
+    const path::PathBuf &DirEntry::path() const
+    {
+        return _inner.path();
+    }
+
     io::Result<bool> DirEntry::next()
     {
         return _inner.next();
