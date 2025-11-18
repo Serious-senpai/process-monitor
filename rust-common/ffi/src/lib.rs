@@ -3,6 +3,9 @@
 #[cfg(feature = "linux-kernel")]
 pub mod linux;
 
+#[cfg(feature = "win32-kernel")]
+pub mod win32;
+
 use core::{fmt, str};
 
 #[cfg(feature = "linux-kernel")]

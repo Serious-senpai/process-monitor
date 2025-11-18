@@ -10,15 +10,16 @@ driver-type = "WDM"
 crate-type = ["cdylib"]
 
 [dependencies]
-ouroboros = "0.18.5"
-postcard = { version = "1.1.3", features = ["alloc"] }
-wdk = "0.3.1"
-wdk-alloc = "0.3.1"
-wdk-panic = "0.3.1"
-wdk-sys = "0.4.0"
+ffi = { workspace = true, features = ["win32-kernel"] }
+ouroboros = { workspace = true }
+postcard = { workspace = true, features = ["alloc"] }
+wdk = { workspace = true, features = ["alloc"] }
+wdk-alloc = { workspace = true }
+wdk-panic = { workspace = true }
+wdk-sys = { workspace = true }
 
 [build-dependencies]
-wdk-build = "0.4.0"
+wdk-build = { workspace = true }
 
 [lints]
 workspace = true

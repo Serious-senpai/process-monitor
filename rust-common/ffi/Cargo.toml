@@ -8,9 +8,12 @@ default = []
 std = []
 linux-user = ["dep:aya", "std", "linux-kernel"]
 linux-kernel = []
+win32-user = ["std", "win32-kernel"]
+win32-kernel = ["dep:wdk-sys"]
 
 [dependencies]
-aya = { git = "https://github.com/aya-rs/aya", optional = true }
+aya = { workspace = true, optional = true }
+wdk-sys = { workspace = true, optional = true }
 
 [build-dependencies]
 anyhow = "1.0.100"

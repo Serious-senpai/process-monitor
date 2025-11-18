@@ -8,6 +8,14 @@ edition.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
+ffi = { workspace = true, features = ["win32-user"] }
+log = { workspace = true }
+simplelog = { workspace = true, features = ["local-offset", "termcolor"] }
+windows = { workspace = true, features = ["Win32", "Win32_Security", "Win32_System", "Win32_System_IO", "Win32_System_Memory"] }
+
+[build-dependencies]
+anyhow = { workspace = true }
+cbindgen-base = { workspace = true }
 
 [lints]
 workspace = true
