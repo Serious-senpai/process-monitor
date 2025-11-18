@@ -7,15 +7,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{ptr, thread};
 
-use aya::Ebpf;
 use aya::maps::{HashMap, MapData, RingBuf};
-use aya::programs::{KProbe, TracePoint};
+use aya::programs::{FExit, KProbe};
+use aya::{Btf, Ebpf};
 use aya_log::EbpfLogger;
 use ffi::{Event, StaticCommandName, Threshold};
 use log::{LevelFilter, debug, error, warn};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 
-macro_rules! _try_hook {
+macro_rules! try_attach {
     ($hook:expr) => {
         $hook
             .attach()
@@ -30,11 +30,27 @@ macro_rules! _try_hook {
     };
 }
 
-fn attach_kretprobe_network(hook: &mut KProbe) -> anyhow::Result<()> {
-    hook.load()?;
+// fn attach_kretprobe_network(hook: &mut KProbe) -> anyhow::Result<()> {
+//     hook.load()?;
 
-    let _ = _try_hook!(hook, "inet_sendmsg", 0);
-    let _ = _try_hook!(hook, "inet_recvmsg", 0);
+//     let _ = try_attach!(hook, "sock_sendmsg", 0);
+//     let _ = try_attach!(hook, "sock_recvmsg", 0);
+
+//     Ok(())
+// }
+
+fn attach_fexit_network_send(btf: &Btf, hook: &mut FExit) -> anyhow::Result<()> {
+    hook.load("sock_sendmsg", &btf)?;
+
+    let _ = try_attach!(hook);
+
+    Ok(())
+}
+
+fn attach_fexit_network_recv(btf: &Btf, hook: &mut FExit) -> anyhow::Result<()> {
+    hook.load("sock_recvmsg", &btf)?;
+
+    let _ = try_attach!(hook);
 
     Ok(())
 }
@@ -44,24 +60,24 @@ fn attach_kretprobe_network(hook: &mut KProbe) -> anyhow::Result<()> {
 //     let _ = tc::qdisc_add_clsact("enp0s3");
 //     hook.load()?;
 
-//     let _ = _try_hook!(hook, "enp0s3", tc::TcAttachType::Ingress);
-//     let _ = _try_hook!(hook, "enp0s3", tc::TcAttachType::Egress);
+//     let _ = try_attach!(hook, "enp0s3", tc::TcAttachType::Ingress);
+//     let _ = try_attach!(hook, "enp0s3", tc::TcAttachType::Egress);
 
 //     Ok(())
 // }
 
-fn attach_tracepoint_disk(hook: &mut TracePoint) -> anyhow::Result<()> {
-    hook.load()?;
+// fn attach_tracepoint_disk(hook: &mut TracePoint) -> anyhow::Result<()> {
+//     hook.load()?;
 
-    let _ = _try_hook!(hook, "block", "block_rq_complete");
+//     let _ = try_attach!(hook, "block", "block_rq_complete");
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 // fn attach_lsm_task_alloc(btf: &Btf, hook: &mut Lsm) -> anyhow::Result<()> {
 //     hook.load("task_alloc", btf)?;
 
-//     let _ = _try_hook!(hook);
+//     let _ = try_attach!(hook);
 
 //     Ok(())
 // }
@@ -69,8 +85,8 @@ fn attach_tracepoint_disk(hook: &mut TracePoint) -> anyhow::Result<()> {
 fn attach_kretprobe_process_creation(hook: &mut KProbe) -> anyhow::Result<()> {
     hook.load()?;
 
-    let _ = _try_hook!(hook, "__x64_sys_execve", 0);
-    let _ = _try_hook!(hook, "__x64_sys_execveat", 0);
+    let _ = try_attach!(hook, "__x64_sys_execve", 0);
+    let _ = try_attach!(hook, "__x64_sys_execveat", 0);
 
     Ok(())
 }
@@ -147,42 +163,54 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
             }
         };
 
-        // let btf = Btf::from_sys_fs()?;
-        attach_kretprobe_network(
-            ebpf.program_mut("kretprobe_network_hook")
-                .expect("Check the eBPF program again for kretprobe_network_hook")
+        let btf = Btf::from_sys_fs()?;
+        // attach_kretprobe_network(
+        //     ebpf.program_mut("kretprobe_network_hook")
+        //         .expect("Check the eBPF program again")
+        //         .try_into()?,
+        // )?;
+        attach_fexit_network_send(
+            &btf,
+            ebpf.program_mut("fexit_sock_sendmsg_hook")
+                .expect("Check the eBPF program again")
+                .try_into()?,
+        )?;
+        attach_fexit_network_recv(
+            &btf,
+            ebpf.program_mut("fexit_sock_recvmsg_hook")
+                .expect("Check the eBPF program again")
                 .try_into()?,
         )?;
         // attach_classifier_network(
         //     ebpf.program_mut("classifier_network_hook")
-        //         .expect("Check the eBPF program again for classifier_network_hook")
+        //         .expect("Check the eBPF program again")
         //         .try_into()?,
         // )?;
-        attach_tracepoint_disk(
-            ebpf.program_mut("tracepoint_disk_hook")
-                .expect("Check the eBPF program again for tracepoint_disk_hook")
-                .try_into()?,
-        )?;
+        // attach_tracepoint_disk(
+        //     ebpf.program_mut("tracepoint_disk_hook")
+        //         .expect("Check the eBPF program again")
+        //         .try_into()?,
+        // )?;
         // attach_lsm_task_alloc(
         //     &btf,
         //     ebpf.program_mut("lsm_task_alloc_hook")
-        //         .expect("Check the eBPF program again for lsm_task_alloc_hook")
+        //         .expect("Check the eBPF program again")
         //         .try_into()?,
         // )?;
         attach_kretprobe_process_creation(
             ebpf.program_mut("kretprobe_process_creation")
-                .expect("Check the eBPF program again for kretprobe_process_creation")
+                .expect("Check the eBPF program again")
                 .try_into()?,
         )?;
 
         let names = HashMap::<MapData, StaticCommandName, Threshold>::try_from(
-            ebpf.take_map("NAMES").ok_or(anyhow::format_err!(
-                "Check the eBPF program again for NAMES"
-            ))?,
+            ebpf.take_map("NAMES")
+                .ok_or(anyhow::format_err!("Check the eBPF program again"))?,
         )?;
-        let events = RingBuf::try_from(ebpf.take_map("EVENTS").ok_or(anyhow::format_err!(
-            "Check the eBPF program again for EVENTS"
-        ))?)?;
+        let events = RingBuf::try_from(
+            ebpf.take_map("EVENTS")
+                .ok_or(anyhow::format_err!("Check the eBPF program again"))?,
+        )?;
 
         debug!("Completed loading eBPF program");
         Ok(KernelTracer {
