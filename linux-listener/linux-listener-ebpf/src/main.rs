@@ -16,8 +16,8 @@ use aya_ebpf::macros::{kretprobe, map, tracepoint};
 use aya_ebpf::maps::{HashMap, LruHashMap, RingBuf};
 use aya_ebpf::programs::{RetProbeContext, TracePointContext};
 use aya_log_ebpf::{debug, warn};
-use linux_listener_common::linux::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
-use linux_listener_common::{
+use ffi::linux::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
+use ffi::{
     Event, EventData, EventType, Metric, NewProcess, StaticCommandName, Threshold, Violation,
 };
 

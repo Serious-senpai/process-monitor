@@ -1,11 +1,15 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-/// cbindgen:ignore
+#[cfg(feature = "linux-kernel")]
 pub mod linux;
 
 use core::{fmt, str};
 
-use aya_ebpf::TASK_COMM_LEN;
+#[cfg(feature = "linux-kernel")]
+pub const COMMAND_LENGTH: usize = 16; // aya_ebpf::TASK_COMM_LEN
+
+#[cfg(not(feature = "linux-kernel"))]
+pub const COMMAND_LENGTH: usize = 256;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -13,31 +17,31 @@ pub struct Threshold {
     pub thresholds: [u32; 4],
 }
 
-#[cfg(feature = "aya")]
+#[cfg(feature = "linux-user")]
 unsafe impl aya::Pod for Threshold {}
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Metric {
-    Cpu,
-    Memory,
-    Disk,
-    Network,
+    Cpu = 0,
+    Memory = 1,
+    Disk = 2,
+    Network = 3,
 }
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
-pub struct StaticCommandName(pub [u8; TASK_COMM_LEN]);
+pub struct StaticCommandName(pub [u8; COMMAND_LENGTH]);
 
-#[cfg(feature = "aya")]
+#[cfg(feature = "linux-user")]
 unsafe impl aya::Pod for StaticCommandName {}
 
 impl From<&str> for StaticCommandName {
     fn from(value: &str) -> Self {
-        let mut buffer = [0u8; TASK_COMM_LEN];
+        let mut buffer = [0u8; COMMAND_LENGTH];
 
         let bytes = value.as_bytes();
-        let len = bytes.len().min(TASK_COMM_LEN - 1); // Exclude null terminator
+        let len = bytes.len().min(COMMAND_LENGTH - 1); // Exclude null terminator
         buffer[..len].copy_from_slice(&bytes[..len]);
 
         Self(buffer)

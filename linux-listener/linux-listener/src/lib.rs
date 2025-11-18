@@ -11,7 +11,7 @@ use aya::Ebpf;
 use aya::maps::{HashMap, MapData, RingBuf};
 use aya::programs::{KProbe, TracePoint};
 use aya_log::EbpfLogger;
-use linux_listener_common::{Event, StaticCommandName, Threshold};
+use ffi::{Event, StaticCommandName, Threshold};
 use log::{LevelFilter, debug, error, warn};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 

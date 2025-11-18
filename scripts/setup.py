@@ -26,8 +26,7 @@ with VSCODE_SETTINGS.open("w", encoding="utf-8") as writer:
         "git.enabled": True,
         "rust-analyzer.check.overrideCommand": ["cargo", "check", "--message-format=json"],
         "rust-analyzer.linkedProjects": [
-            "${workspaceFolder}/cbindgen-base/Cargo.toml",
-            "${workspaceFolder}/common-ffi/Cargo.toml",
+            "${workspaceFolder}/rust-common/Cargo.toml",
         ],
         "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
     }

@@ -1,17 +1,16 @@
 [package]
-name = "common-ffi"
+name = "ffi"
 version = "0.1.0"
 edition = "2024"
 
 [features]
 default = []
 std = []
-aya = ["dep:aya", "std", "aya-ebpf"]
-aya-ebpf = ["dep:aya-ebpf"]
+linux-user = ["dep:aya", "std", "linux-kernel"]
+linux-kernel = []
 
 [dependencies]
 aya = { git = "https://github.com/aya-rs/aya", optional = true }
-aya-ebpf = { git = "https://github.com/aya-rs/aya", optional = true }
 
 [build-dependencies]
 anyhow = "1.0.100"
