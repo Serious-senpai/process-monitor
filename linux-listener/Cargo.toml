@@ -7,6 +7,8 @@ members = [
 default-members = ["linux-listener"]
 
 [workspace.package]
+version = "0.1.0"
+authors = ["Serious-senpai"]
 edition = "2024"
 
 [workspace.dependencies]

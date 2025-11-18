@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["windows-listener-driver"]
+members = ["windows-listener", "windows-listener-driver"]
 
 [workspace.package]
 version = "0.1.0"
