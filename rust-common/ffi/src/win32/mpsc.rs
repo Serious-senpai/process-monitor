@@ -12,18 +12,16 @@ pub struct Channel<const N: usize> {
 }
 
 impl<const N: usize> Channel<N> {
-    #[cfg(feature = "win32-user")]
-    pub fn new() -> Result<Self, usize> {
-        if N == 0 && N.count_ones() != 1 {
-            return Err(N);
-        }
+    pub const fn new() -> Channel<N> {
+        assert!(N > 0);
+        assert!(N.is_power_of_two());
 
-        Ok(Self {
+        Self {
             _read: AtomicUsize::new(0),
             _write_commit: AtomicUsize::new(0),
             _write_reserve: AtomicUsize::new(0),
             _buffer: UnsafeCell::new([0; N]),
-        })
+        }
     }
 
     #[cfg(feature = "win32-user")]

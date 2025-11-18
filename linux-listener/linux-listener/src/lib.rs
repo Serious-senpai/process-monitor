@@ -358,6 +358,6 @@ pub unsafe extern "C" fn next_event(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn drop_event(event: *mut Event) {
     if !event.is_null() {
-        let _ = unsafe { Box::from_raw(event) };
+        drop(unsafe { Box::from_raw(event) });
     }
 }

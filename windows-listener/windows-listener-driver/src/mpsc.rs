@@ -10,6 +10,8 @@ use wdk_sys::{HANDLE, SECTION_MAP_READ, SECTION_MAP_WRITE};
 use crate::error::RuntimeError;
 use crate::wrappers::user_object::UserObjectMap;
 
+const _TEMPLATE_CHANNEL: DefaultChannel = DefaultChannel::new();
+
 pub struct UserChannelMap {
     _object: UserObjectMap,
     _channel: *const DefaultChannel,
@@ -30,6 +32,11 @@ impl UserChannelMap {
         let status = unsafe { MmMapViewInSystemSpace(object.get(), &mut channel, &mut view_size) };
         if !nt_success(status) {
             return Err(RuntimeError::Failure(status));
+        }
+
+        // Initialize the channel memory ourselves. Do not trust memory from userspace.
+        unsafe {
+            ptr::write_volatile(channel as *mut DefaultChannel, _TEMPLATE_CHANNEL);
         }
 
         Ok(Self {

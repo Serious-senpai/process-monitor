@@ -37,9 +37,7 @@ impl<'a> IoctlHandler<'a> for MemoryCleanupHandler<'a> {
         let old = ptr::null_mut();
         self._extension.shared_memory.swap(old, Ordering::SeqCst);
         if !old.is_null() {
-            unsafe {
-                let _ = Box::from_raw(old);
-            }
+            drop(unsafe { Box::from_raw(old) });
         }
 
         Ok(())

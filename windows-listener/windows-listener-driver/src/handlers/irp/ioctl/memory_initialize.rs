@@ -62,9 +62,7 @@ impl<'a> IoctlHandler<'a> for MemoryInitializeHandler<'a> {
             .swap(shared_memory, Ordering::SeqCst);
 
         if !old.is_null() {
-            unsafe {
-                let _ = Box::from_raw(old);
-            }
+            drop(unsafe { Box::from_raw(old) });
         }
 
         Ok(())

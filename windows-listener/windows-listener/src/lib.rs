@@ -14,6 +14,7 @@ use windows::Win32::System::Memory::{
     CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
     PAGE_READWRITE, UnmapViewOfFile,
 };
+use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::core::PCWSTR;
 
 #[derive(Debug)]
@@ -43,6 +44,7 @@ struct _KernelTracer {
     pub hmap: HANDLE,
     pub base: _MappedMemoryGuard,
     pub device: _DeviceGuard,
+    pub event: HANDLE,
 }
 
 pub struct KernelTracerHandle {
@@ -83,68 +85,87 @@ pub unsafe extern "C" fn initialize_logger(level: c_int) -> c_int {
 /// This function is just marked as `unsafe` because it is exposed via `extern "C"`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
-    let view_size = size_of::<MemoryInitialize>();
-    match unsafe {
+    let channel_size = size_of::<DefaultChannel>();
+    let channel_size_u32 = match u32::try_from(channel_size) {
+        Ok(size) => size,
+        Err(e) => {
+            error!("DefaultChannel size is too large: {e}");
+            return ptr::null_mut();
+        }
+    };
+
+    let hmap = match unsafe {
         CreateFileMappingW(
             INVALID_HANDLE_VALUE,
             None,
             PAGE_READWRITE,
-            ((view_size >> 32) & 0xFFFFFFFF) as u32,
-            (view_size & 0xFFFFFFFF) as u32,
+            0,
+            channel_size_u32,
             PCWSTR::from_raw(ptr::null()),
         )
     } {
-        Ok(hmap) => {
-            // `HANDLE` already has a `Drop` impl that calls `CloseHandle`. I do not really like this implicit behavior though.
-            let base =
-                unsafe { MapViewOfFile(hmap, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, view_size) };
+        Ok(hmap) => hmap,
+        Err(e) => {
+            error!("CreateFileMappingW failed: {e}");
+            return ptr::null_mut();
+        }
+    };
 
-            if base.Value.is_null() {
-                error!("MapViewOfFile failed: {}", io::Error::last_os_error());
+    // `HANDLE` already has a `Drop` impl that calls `CloseHandle`. I do not really like this implicit behavior though.
+    let base = unsafe { MapViewOfFile(hmap, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, channel_size) };
+
+    if base.Value.is_null() {
+        error!("MapViewOfFile failed: {}", io::Error::last_os_error());
+        return ptr::null_mut();
+    }
+
+    let base = _MappedMemoryGuard(base);
+    let event = match unsafe { CreateEventW(None, false, false, PCWSTR::from_raw(ptr::null())) } {
+        Ok(event) => event,
+        Err(e) => {
+            error!("CreateEventW failed: {e}");
+            return ptr::null_mut();
+        }
+    };
+
+    match OpenOptions::new()
+        .read(false)
+        .write(false)
+        .open(DEVICE_NAME)
+    {
+        Ok(file) => {
+            let device = _DeviceGuard(HANDLE(file.into_raw_handle()));
+            let message = MemoryInitialize {
+                section: hmap.0,
+                event: event.0,
+            };
+
+            if let Err(e) = unsafe {
+                DeviceIoControl(
+                    device.0,
+                    IOCTL_MEMORY_INITIALIZE,
+                    Some(&message as *const _ as *const c_void),
+                    size_of::<MemoryInitialize>() as _,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+            } {
+                error!("DeviceIoControl failed: {e}");
                 return ptr::null_mut();
             }
 
-            let base = _MappedMemoryGuard(base);
-
-            match OpenOptions::new()
-                .read(false)
-                .write(false)
-                .open(DEVICE_NAME)
-            {
-                Ok(file) => {
-                    let device = _DeviceGuard(HANDLE(file.into_raw_handle()));
-                    let message = MemoryInitialize {
-                        section: hmap.0,
-                        event: device.0.0,
-                    };
-
-                    if let Err(e) = unsafe {
-                        DeviceIoControl(
-                            device.0,
-                            IOCTL_MEMORY_INITIALIZE,
-                            Some(&message as *const _ as *const c_void),
-                            size_of::<MemoryInitialize>() as _,
-                            None,
-                            0,
-                            None,
-                            None,
-                        )
-                    } {
-                        error!("DeviceIoControl failed: {e}");
-                        return ptr::null_mut();
-                    }
-
-                    let tracer = Box::new(_KernelTracer { hmap, base, device });
-                    Box::into_raw(tracer) as *mut KernelTracerHandle
-                }
-                Err(e) => {
-                    error!("Failed to open device {DEVICE_NAME:?}: {e}");
-                    ptr::null_mut()
-                }
-            }
+            let tracer = Box::new(_KernelTracer {
+                hmap,
+                base,
+                device,
+                event,
+            });
+            Box::into_raw(tracer) as *mut KernelTracerHandle
         }
         Err(e) => {
-            error!("CreateFileMappingW failed: {e}");
+            error!("Failed to open device {DEVICE_NAME:?}: {e}");
             ptr::null_mut()
         }
     }
@@ -156,7 +177,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
 pub unsafe extern "C" fn free_tracer(tracer: *mut KernelTracerHandle) {
     let tracer = tracer as *mut _KernelTracer;
     if !tracer.is_null() {
-        let _ = unsafe { Box::from_raw(tracer) };
+        drop(unsafe { Box::from_raw(tracer) });
     }
 }
 
@@ -188,7 +209,17 @@ pub unsafe extern "C" fn next_event(
     tracer: *const KernelTracerHandle,
     timeout_ms: c_int,
 ) -> *mut Event {
-    ptr::null_mut()
+    let tracer = tracer as *mut _KernelTracer;
+    if let Some(tracer) = unsafe { tracer.as_ref() } {
+        unsafe {
+            WaitForSingleObject(tracer.event, timeout_ms.try_into().unwrap_or(u32::MAX));
+        }
+
+        let channel = tracer.base.0.Value as *const DefaultChannel;
+        let channel = unsafe { &*channel };
+    }
+
+    todo!()
 }
 
 /// # Safety
