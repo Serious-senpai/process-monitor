@@ -1,5 +1,7 @@
+use core::slice;
 use core::sync::atomic::Ordering;
 
+use ffi::{Event, EventData, EventType, NewProcess, StaticCommandName};
 use wdk_sys::{BOOLEAN, HANDLE};
 
 use crate::config::DRIVER;
@@ -20,20 +22,21 @@ pub unsafe extern "C" fn process_notify(parent_id: HANDLE, process_id: HANDLE, c
         }
         && let Some(inner) = unsafe { inner.load(Ordering::SeqCst).as_ref() }
     {
-        let event =
-            alloc::format!("Process {{ pid: {process_id}, ppid: {parent_id}, create: {create} }}"); // TODO: replace with proper struct
+        let event = Event {
+            pid: process_id.try_into().unwrap_or(u32::MAX),
+            name: StaticCommandName::from("dummy"), // TODO: get process name
+            variant: EventType::NewProcess,
+            data: EventData {
+                new_process: NewProcess {},
+            },
+        };
 
-        match postcard::to_allocvec_cobs(&event) {
-            Ok(data) => {
-                if let Err(e) = inner.queue.send(&data) {
-                    log!("Failed to write data to shared memory queue: {e}");
-                } else {
-                    inner.event.set();
-                }
-            }
-            Err(e) => {
-                log!("Failed to serialize process: {e}");
-            }
+        if let Err(e) = inner.queue.send(unsafe {
+            slice::from_raw_parts(&event as *const _ as *const u8, size_of::<Event>())
+        }) {
+            log!("Failed to write data to shared memory queue: {e}");
+        } else {
+            inner.event.set();
         }
     }
 }

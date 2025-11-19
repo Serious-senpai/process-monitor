@@ -16,5 +16,5 @@ aya = { workspace = true, optional = true }
 wdk-sys = { workspace = true, optional = true }
 
 [build-dependencies]
-anyhow = "1.0.100"
+anyhow = { workspace = true }
 cbindgen-base = { path = "../cbindgen-base" }

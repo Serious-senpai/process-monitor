@@ -10,6 +10,7 @@
 #include "io.hpp"
 #include "listener.hpp"
 
+#ifdef __linux__
 class Statistics
 {
 private:
@@ -341,3 +342,25 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
+#elif defined(_WIN32)
+
+int main()
+{
+    if (initialize_logger(3))
+    {
+        std::cerr << "Failed to initialize logger." << std::endl;
+        return 1;
+    }
+
+    auto tracer = new_tracer();
+    if (tracer == nullptr)
+    {
+        std::cerr << "Failed to create tracer." << std::endl;
+        return 1;
+    }
+
+    free_tracer(tracer);
+}
+
+#endif

@@ -1,7 +1,7 @@
 use std::ffi::{c_char, c_int, c_void};
 use std::fs::OpenOptions;
 use std::os::windows::io::IntoRawHandle;
-use std::{io, ptr};
+use std::{io, ptr, slice};
 
 use ffi::win32::message::{IOCTL_MEMORY_CLEANUP, IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
 use ffi::win32::mpsc::DefaultChannel;
@@ -210,19 +210,33 @@ pub unsafe extern "C" fn next_event(
     timeout_ms: c_int,
 ) -> *mut Event {
     let tracer = tracer as *mut _KernelTracer;
-    if let Some(tracer) = unsafe { tracer.as_ref() } {
-        unsafe {
-            WaitForSingleObject(tracer.event, timeout_ms.try_into().unwrap_or(u32::MAX));
+    match unsafe { tracer.as_ref() } {
+        Some(tracer) => {
+            unsafe {
+                WaitForSingleObject(tracer.event, timeout_ms.try_into().unwrap_or(u32::MAX));
+            }
+
+            let channel = tracer.base.0.Value as *const DefaultChannel;
+            let channel = unsafe { &*channel };
+
+            let mut event = Box::<Event>::new_uninit();
+            let mut buffer = unsafe {
+                slice::from_raw_parts_mut(event.as_mut_ptr() as *mut u8, size_of::<Event>())
+            };
+            channel.read(&mut buffer);
+
+            let event = unsafe { event.assume_init() };
+            Box::into_raw(event)
         }
-
-        let channel = tracer.base.0.Value as *const DefaultChannel;
-        let channel = unsafe { &*channel };
+        None => ptr::null_mut(),
     }
-
-    todo!()
 }
 
 /// # Safety
 /// The provided pointer must be null or a valid pointer obtained from [`next_event`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn drop_event(event: *mut Event) {}
+pub unsafe extern "C" fn drop_event(event: *mut Event) {
+    if !event.is_null() {
+        drop(unsafe { Box::from_raw(event) });
+    }
+}

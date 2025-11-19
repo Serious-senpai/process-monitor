@@ -14,7 +14,6 @@ cbindgen-base = { path = "../rust-common/cbindgen-base", default-features = fals
 ffi = { path = "../rust-common/ffi", default-features = false }
 log = { version = "0.4.22", default-features = false }
 ouroboros = { version = "0.18.5", default-features = false }
-postcard = { version = "1.1.3", default-features = false }
 simplelog = { version = "0.12.2", default-features = false }
 wdk = { version = "0.4.1", default-features = false }
 wdk-alloc = { version = "0.4.1", default-features = false }
@@ -52,7 +51,6 @@ use_self = "warn"
 wildcard_imports = "warn"
 
 [profile.dev]
-lto = "thin"
 panic = "abort"
 
 [profile.release]

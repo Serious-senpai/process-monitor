@@ -24,7 +24,16 @@ target_precompile_headers(ProcessMonitor PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${PR
 
 # Rust bindings
 if(WIN32)
-    target_link_libraries(ProcessMonitor PRIVATE "${PROCESS_MONITOR_ROOT}/../windows-listener/target/release/windows_listener.dll")
+    file(REAL_PATH "${PROCESS_MONITOR_ROOT}/../windows-listener/target/release/windows_listener.dll" ORIGINAL_CDYLIB)
+    file(TO_CMAKE_PATH "${CMAKE_BINARY_DIR}/windows_listener.dll" COPIED_CDYLIB)
+
 elseif(UNIX)
-    target_link_libraries(ProcessMonitor PRIVATE "${PROCESS_MONITOR_ROOT}/../linux-listener/target/release/liblinux_listener.so")
+    file(REAL_PATH "${PROCESS_MONITOR_ROOT}/../linux-listener/target/release/liblinux_listener.so" ORIGINAL_CDYLIB)
+    file(TO_CMAKE_PATH "${CMAKE_BINARY_DIR}/liblinux_listener.so" COPIED_CDYLIB)
+
 endif()
+
+message(STATUS "Copying ${ORIGINAL_CDYLIB} to ${COPIED_CDYLIB}")
+file(COPY_FILE "${ORIGINAL_CDYLIB}" "${COPIED_CDYLIB}")
+
+target_link_libraries(ProcessMonitor PRIVATE "${COPIED_CDYLIB}")

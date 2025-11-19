@@ -38,8 +38,6 @@ namespace _fs_impl
             closedir(_dir);
             _dir = nullptr;
         }
-
-        _path = path::PathBuf();
     }
 
     const path::PathBuf &NativeDirEntry::path() const noexcept
