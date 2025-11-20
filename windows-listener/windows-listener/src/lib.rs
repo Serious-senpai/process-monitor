@@ -8,7 +8,7 @@ use ffi::win32::mpsc::DefaultChannel;
 use ffi::{Event, Threshold};
 use log::{LevelFilter, error};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
-use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Memory::{
     CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
@@ -51,7 +51,7 @@ pub struct KernelTracerHandle {
     _private: [u8; 0],
 }
 
-const DEVICE_NAME: &str = r"\\.\LogDrvDev";
+const DEVICE_NAME: &str = r"\\.\WinLisDev";
 
 /// # Safety
 /// This function is just marked as `unsafe` because it is exposed via `extern "C"`.
@@ -128,11 +128,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
         }
     };
 
-    match OpenOptions::new()
-        .read(false)
-        .write(false)
-        .open(DEVICE_NAME)
-    {
+    match OpenOptions::new().read(true).write(true).open(DEVICE_NAME) {
         Ok(file) => {
             let device = _DeviceGuard(HANDLE(file.into_raw_handle()));
             let message = MemoryInitialize {
@@ -207,13 +203,13 @@ pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_i
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn next_event(
     tracer: *const KernelTracerHandle,
-    timeout_ms: c_int,
+    timeout_ms: u32,
 ) -> *mut Event {
     let tracer = tracer as *mut _KernelTracer;
     match unsafe { tracer.as_ref() } {
         Some(tracer) => {
-            unsafe {
-                WaitForSingleObject(tracer.event, timeout_ms.try_into().unwrap_or(u32::MAX));
+            if unsafe { WaitForSingleObject(tracer.event, timeout_ms) } != WAIT_OBJECT_0 {
+                return ptr::null_mut();
             }
 
             let channel = tracer.base.0.Value as *const DefaultChannel;

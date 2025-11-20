@@ -1,8 +1,8 @@
 use core::cell::UnsafeCell;
 #[cfg(feature = "win32-user")]
 use core::cmp;
-use core::hint;
-use core::sync::atomic::{AtomicUsize, Ordering, fence};
+use core::sync::atomic::{AtomicUsize, Ordering};
+use core::{hint, ptr};
 
 pub struct Channel<const N: usize> {
     _read: AtomicUsize,
@@ -12,6 +12,8 @@ pub struct Channel<const N: usize> {
 }
 
 impl<const N: usize> Channel<N> {
+    const _SIZE_MASK: usize = N - 1;
+
     pub const fn new() -> Channel<N> {
         assert!(N > 0);
         assert!(N.is_power_of_two());
@@ -28,31 +30,49 @@ impl<const N: usize> Channel<N> {
     pub fn read(&self, buffer: &mut [u8]) -> usize {
         let write_commit = self._write_commit.load(Ordering::Acquire);
         let read = self._read.load(Ordering::Relaxed);
-        let our_buffer = unsafe { &*self._buffer.get() };
+
+        // Avoid violating the aliasing rules
+        // let our_buffer = unsafe { &*self._buffer.get() };
+        let base_ptr = self._buffer.get() as *const u8;
 
         let length = if write_commit < read {
             let length = cmp::min(buffer.len(), N - read + write_commit);
-            if read + length < N {
-                buffer[..length].copy_from_slice(&our_buffer[read..read + length]);
-            } else {
-                let tail = N - read;
-                buffer[..tail].copy_from_slice(&our_buffer[read..]);
-                buffer[tail..length].copy_from_slice(&our_buffer[..length - tail]);
+            unsafe {
+                if read + length < N {
+                    // buffer[..length].copy_from_slice(&our_buffer[read..read + length]);
+                    ptr::copy_nonoverlapping(base_ptr.add(read), buffer.as_mut_ptr(), length);
+                } else {
+                    let tail = N - read;
+                    // buffer[..tail].copy_from_slice(&our_buffer[read..]);
+                    ptr::copy_nonoverlapping(base_ptr.add(read), buffer.as_mut_ptr(), tail);
+                    // buffer[tail..length].copy_from_slice(&our_buffer[..length - tail]);
+                    ptr::copy_nonoverlapping(
+                        base_ptr,
+                        buffer.as_mut_ptr().add(tail),
+                        length - tail,
+                    );
+                }
             }
 
             length
         } else {
             let length = cmp::min(buffer.len(), write_commit - read);
-            buffer[..length].copy_from_slice(&our_buffer[read..read + length]);
+            // buffer[..length].copy_from_slice(&our_buffer[read..read + length]);
+            unsafe {
+                ptr::copy_nonoverlapping(base_ptr.add(read), buffer.as_mut_ptr(), length);
+            }
             length
         };
 
-        self._read.store((read + length) & N, Ordering::Release);
+        self._read
+            .store((read + length) & Self::_SIZE_MASK, Ordering::Release);
         length
     }
 
     pub fn write(&self, buffer: &[u8]) -> Result<(), usize> {
-        let our_buffer = unsafe { &mut *self._buffer.get() };
+        // Avoid violating the aliasing rules
+        // let our_buffer = unsafe { &mut *self._buffer.get() };
+        let base_ptr = self._buffer.get() as *mut u8;
 
         loop {
             let write_reserve = self._write_reserve.load(Ordering::Acquire);
@@ -67,7 +87,7 @@ impl<const N: usize> Channel<N> {
                 return Err(available);
             }
 
-            let new_write_reserve = (write_reserve + buffer.len()) & N;
+            let new_write_reserve = (write_reserve + buffer.len()) & Self::_SIZE_MASK;
             if self
                 ._write_reserve
                 .compare_exchange(
@@ -78,22 +98,42 @@ impl<const N: usize> Channel<N> {
                 )
                 .is_ok()
             {
-                if write_reserve < read {
-                    // No wrap because write_reserve < read < N
-                    our_buffer[write_reserve..new_write_reserve].copy_from_slice(buffer);
-                } else {
-                    let tail = N - write_reserve;
-                    if buffer.len() > tail {
-                        // Wrap around
-                        our_buffer[write_reserve..].copy_from_slice(&buffer[..tail]);
-                        our_buffer[..new_write_reserve].copy_from_slice(&buffer[tail..]);
+                unsafe {
+                    if write_reserve < read {
+                        // No wrap because write_reserve < read < N
+                        // our_buffer[write_reserve..new_write_reserve].copy_from_slice(buffer);
+                        ptr::copy_nonoverlapping(
+                            buffer.as_ptr(),
+                            base_ptr.add(write_reserve),
+                            buffer.len(),
+                        );
                     } else {
-                        // No wrap
-                        our_buffer[write_reserve..new_write_reserve].copy_from_slice(buffer);
+                        let tail = N - write_reserve;
+                        if buffer.len() > tail {
+                            // Wrap around
+                            // our_buffer[write_reserve..].copy_from_slice(&buffer[..tail]);
+                            ptr::copy_nonoverlapping(
+                                buffer.as_ptr(),
+                                base_ptr.add(write_reserve),
+                                tail,
+                            );
+                            // our_buffer[..new_write_reserve].copy_from_slice(&buffer[tail..]);
+                            ptr::copy_nonoverlapping(
+                                buffer.as_ptr().add(tail),
+                                base_ptr,
+                                new_write_reserve,
+                            );
+                        } else {
+                            // No wrap
+                            // our_buffer[write_reserve..new_write_reserve].copy_from_slice(buffer);
+                            ptr::copy_nonoverlapping(
+                                buffer.as_ptr(),
+                                base_ptr.add(write_reserve),
+                                buffer.len(),
+                            );
+                        }
                     }
                 }
-
-                fence(Ordering::Release);
 
                 loop {
                     // Wait for our turn to commit
@@ -101,6 +141,7 @@ impl<const N: usize> Channel<N> {
                     if current_commit == write_reserve {
                         self._write_commit
                             .store(new_write_reserve, Ordering::Release);
+
                         return Ok(());
                     }
 

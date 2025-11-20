@@ -360,6 +360,35 @@ int main()
         return 1;
     }
 
+    for (int i = 0; i < 60; i++)
+    {
+        auto event = next_event(tracer, 1000);
+        if (event != nullptr)
+        {
+            if (event->variant == EventType::Violation)
+            {
+                std::cout << "Violation Event detected: PID " << event->pid
+                          << ", Name: " << reinterpret_cast<const char *>(event->name)
+                          << ", Metric: " << static_cast<int>(event->data.violation.metric)
+                          << ", Value: " << event->data.violation.value
+                          << ", Threshold: " << event->data.violation.threshold
+                          << std::endl;
+            }
+            else if (event->variant == EventType::NewProcess)
+            {
+                std::cout << "New Process Event detected: PID " << event->pid
+                          << ", Name: " << reinterpret_cast<const char *>(event->name)
+                          << std::endl;
+            }
+
+            drop_event(event);
+        }
+        else
+        {
+            std::cout << "No event received." << std::endl;
+        }
+    }
+
     free_tracer(tracer);
 }
 

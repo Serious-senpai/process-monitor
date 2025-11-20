@@ -1,4 +1,8 @@
-use wdk_sys::{PIO_STACK_LOCATION, PIRP};
+use wdk_sys::{PEPROCESS, PIO_STACK_LOCATION, PIRP};
+
+unsafe extern "C" {
+    pub unsafe fn PsGetProcessImageFileName(Process: PEPROCESS) -> *const u8;
+}
 
 /// # Safety
 /// Binding to [`IoGetCurrentIrpStackLocation`](https://codemachine.com/downloads/win71/wdm.h)
