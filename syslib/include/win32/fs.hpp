@@ -128,12 +128,14 @@ namespace _fs_impl
     private:
         HANDLE _dir;
         std::optional<WIN32_FIND_DATAW> _entry;
+        path::PathBuf _path;
 
     public:
         explicit NativeDirEntry(HANDLE dir, std::optional<WIN32_FIND_DATAW> entry);
         NativeDirEntry(NativeDirEntry &&other);
         ~NativeDirEntry();
 
+        const path::PathBuf &path() const noexcept;
         io::Result<bool> next();
     };
 

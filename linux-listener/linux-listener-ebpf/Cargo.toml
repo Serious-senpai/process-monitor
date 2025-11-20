@@ -1,13 +1,13 @@
 [package]
 name = "linux-listener-ebpf"
-version = "0.1.0"
+version.workspace = true
+authors.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [dependencies]
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
-linux-listener-common = { path = "../linux-listener-common" }
+ffi = { workspace = true, features = ["linux-kernel"] }
 
 [build-dependencies]
 which = { workspace = true }

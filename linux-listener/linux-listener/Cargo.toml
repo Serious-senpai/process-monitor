@@ -1,18 +1,18 @@
 [package]
 name = "linux-listener"
-version = "0.1.0"
+version.workspace = true
+authors.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = { workspace = true, default-features = true }
+anyhow = { workspace = true }
 aya = { workspace = true }
 aya-log = { workspace = true }
+ffi = { workspace = true, features = ["linux-user"] }
 libc = { workspace = true }
-linux-listener-common = { path = "../linux-listener-common", features = ["aya"] }
 log = { workspace = true }
 simplelog = { workspace = true, features = ["local-offset", "termcolor"] }
 
@@ -20,7 +20,7 @@ simplelog = { workspace = true, features = ["local-offset", "termcolor"] }
 anyhow = { workspace = true }
 aya-build = { workspace = true }
 cargo_metadata = { workspace = true }
-cbindgen = { workspace = true }
+cbindgen-base = { workspace = true }
 
 # TODO(https://github.com/rust-lang/cargo/issues/12375): this should be an artifact dependency, but
 # it's not possible to tell cargo to use `-Z build-std` to build it. We cargo-in-cargo in the build

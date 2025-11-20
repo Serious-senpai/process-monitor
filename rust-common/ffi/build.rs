@@ -5,25 +5,17 @@ fn main() -> anyhow::Result<()> {
     let linux_listener_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
     let headers_dir = linux_listener_dir
         .join("..")
+        .join("..")
         .join("process_monitor")
         .join("generated");
 
-    cbindgen::Builder::new()
-        .with_crate(&linux_listener_dir)
-        .with_language(cbindgen::Language::Cxx)
-        .with_tab_width(4)
-        .with_braces(cbindgen::Braces::NextLine)
-        .with_cpp_compat(true)
-        .with_documentation(true)
-        // .with_parse_deps(true)
-        .with_pragma_once(true)
-        .with_no_includes()
+    cbindgen_base::default(&linux_listener_dir)
         .with_include("pch.hpp")
-        // .with_after_include("#define COMMAND_LENGTH 16")
         .include_item("Threshold")
         .include_item("Metric")
         .include_item("StaticCommandName")
         .include_item("Event")
+        .with_define("feature", "linux-kernel", "__linux__")
         .generate()?
         .write_to_file(headers_dir.join("types.hpp"));
 

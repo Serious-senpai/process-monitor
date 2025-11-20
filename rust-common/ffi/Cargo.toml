@@ -1,0 +1,20 @@
+[package]
+name = "ffi"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+std = []
+linux-user = ["dep:aya", "std", "linux-kernel"]
+linux-kernel = []
+win32-user = ["std", "win32-kernel"]
+win32-kernel = ["dep:wdk-sys"]
+
+[dependencies]
+aya = { workspace = true, optional = true }
+wdk-sys = { workspace = true, optional = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
+cbindgen-base = { path = "../cbindgen-base" }

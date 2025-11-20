@@ -39,16 +39,7 @@ fn generate_c_header() -> anyhow::Result<()> {
         .join("process_monitor")
         .join("generated");
 
-    cbindgen::Builder::new()
-        .with_crate(&linux_listener_dir)
-        .with_language(cbindgen::Language::Cxx)
-        .with_tab_width(4)
-        .with_braces(cbindgen::Braces::NextLine)
-        .with_cpp_compat(true)
-        .with_documentation(true)
-        // .with_parse_deps(true)
-        .with_pragma_once(true)
-        .with_no_includes()
+    cbindgen_base::default(&linux_listener_dir)
         .with_include("types.hpp")
         .generate()?
         .write_to_file(headers_dir.join("listener.hpp"));

@@ -10,26 +10,55 @@
 #include "io.hpp"
 #include "listener.hpp"
 
-struct CPUStat
+#ifdef __linux__
+class Statistics
 {
-    uint64_t usage;
-    uint64_t total;
+private:
+    uint64_t _cpu;
+    uint64_t _rss;
+    uint64_t _disk;
+    uint64_t _total;
 
-    uint64_t rate(const CPUStat &old) const
+    uint64_t _delta_rate(uint64_t stats, uint64_t old_stats, const Statistics &old) const
     {
-        if (total == old.total)
+        auto ticks = _total - old._total;
+        if (ticks == 0)
         {
             return 0;
         }
 
-        return (usage - old.usage) * 10000 / (total - old.total);
+        static uint64_t cpu_cores = sysconf(_SC_NPROCESSORS_ONLN);
+
+        // Multiply by 100 to get percentage, another 100 to retain two decimal places
+        return (stats - old_stats) * 10000 * cpu_cores / ticks;
+    }
+
+public:
+    explicit Statistics(uint64_t cpu, uint64_t rss, uint64_t disk, uint64_t total)
+        : _cpu(cpu), _rss(rss), _disk(disk), _total(total) {}
+
+    uint64_t cpu_usage(const Statistics &old) const
+    {
+        return _delta_rate(_cpu, old._cpu, old);
+    }
+
+    uint64_t memory_usage() const
+    {
+        static uint64_t page_size = sysconf(_SC_PAGESIZE);
+        return _rss * page_size;
+    }
+
+    uint64_t disk_usage(const Statistics &old) const
+    {
+        static uint64_t user_hz = sysconf(_SC_CLK_TCK);
+        return _delta_rate(_disk, old._disk, old) / user_hz;
     }
 };
 
 std::atomic<bool> stopped = false;
 
 std::mutex pids_mutex;
-std::unordered_map<uint32_t, CPUStat> pids;
+std::unordered_map<uint32_t, Statistics> pids;
 
 std::mutex names_mutex;
 std::unordered_set<std::string> names;
@@ -100,6 +129,34 @@ std::pair<uint64_t, uint64_t> get_cpu_mem_usage(uint32_t pid, std::span<char> bu
     return std::make_pair(0, 0);
 }
 
+uint64_t get_disk_usage(uint32_t pid, std::span<char> buffer)
+{
+    auto file = fs::File::open(std::format("/proc/{}/io", pid));
+
+    if (file.is_ok())
+    {
+        auto size = file.unwrap().read(buffer);
+        if (size.is_ok())
+        {
+            buffer[size.unwrap()] = '\0';
+            std::istringstream stream(buffer.data());
+
+            std::string ignore;
+            for (int i = 0; i < 9; i++)
+            {
+                stream >> ignore;
+            }
+
+            uint64_t read_bytes, write_bytes;
+            stream >> read_bytes >> ignore >> write_bytes;
+
+            return read_bytes + write_bytes;
+        }
+    }
+
+    return 0;
+}
+
 uint64_t get_total_cpu_time(std::span<char> buffer)
 {
     auto file = fs::File::open("/proc/stat");
@@ -149,10 +206,11 @@ void populate_initial_pids()
         {
             uint32_t pid = std::stoul(filename);
 
-            auto cpu = get_cpu_mem_usage<false>(pid, span).first;
-            if (cpu > 0)
+            auto disk = get_disk_usage(pid, span);
+            auto [cpu, rss] = get_cpu_mem_usage<false>(pid, span);
+            if (cpu > 0 || rss > 0)
             {
-                pids[pid] = CPUStat{cpu, get_total_cpu_time(span)};
+                pids.emplace(pid, Statistics(cpu, rss, disk, get_total_cpu_time(span)));
             }
         }
 
@@ -170,7 +228,7 @@ void populate_initial_pids()
     }
 }
 
-void detect_cpu_mem()
+void detect_cpu_mem_disk()
 {
     char buffer[512] = {0};
     std::span<char> span(buffer, sizeof(buffer));
@@ -182,15 +240,20 @@ void detect_cpu_mem()
         std::lock_guard<std::mutex> lock(pids_mutex);
         for (auto iter = pids.begin(); iter != pids.end();)
         {
-            auto [cpu_usage, mem_usage] = get_cpu_mem_usage<true>(iter->first, span);
+            auto disk = get_disk_usage(iter->first, span);
+            auto [cpu, rss] = get_cpu_mem_usage<true>(iter->first, span);
 
-            if (cpu_usage > 0 || mem_usage > 0)
+            if (cpu > 0 || rss > 0)
             {
-                CPUStat new_state{cpu_usage, get_total_cpu_time(span)};
-                auto rate = new_state.rate(iter->second);
+                Statistics new_state(cpu, rss, disk, get_total_cpu_time(span));
+                auto cpu_usage = new_state.cpu_usage(iter->second);
+                auto mem_usage = new_state.memory_usage();
+                auto disk_usage = new_state.disk_usage(iter->second);
                 iter->second = new_state;
 
-                std::cout << "PID " << iter->first << " CPU usage: " << static_cast<double>(rate) / 100.0 << "%" << ", Memory usage: " << mem_usage << std::endl;
+                std::cout << "PID " << iter->first << " CPU usage: " << static_cast<double>(cpu_usage) / 100.0
+                          << " %, Memory usage: " << mem_usage
+                          << " bytes, Disk usage: " << static_cast<double>(disk_usage) / 100.0 << " B/s" << std::endl;
                 iter++;
             }
             else
@@ -236,7 +299,7 @@ int main(int argc, char **argv)
     char buffer[512] = {0};
     std::span<char> span(buffer, sizeof(buffer));
 
-    std::thread cpu_thread(detect_cpu_mem);
+    std::thread cpu_thread(detect_cpu_mem_disk);
     while (true)
     {
         auto event = next_event(tracer, -1);
@@ -258,7 +321,13 @@ int main(int argc, char **argv)
                           << std::endl;
 
                 std::lock_guard<std::mutex> lock(pids_mutex);
-                pids[event->pid] = CPUStat{get_cpu_mem_usage<true>(event->pid, span).first, get_total_cpu_time(span)};
+
+                auto disk = get_disk_usage(event->pid, span);
+                auto [cpu, rss] = get_cpu_mem_usage<true>(event->pid, span);
+                if (cpu > 0 || rss > 0)
+                {
+                    pids.emplace(event->pid, Statistics(cpu, rss, disk, get_total_cpu_time(span)));
+                }
             }
 
             drop_event(event);
@@ -273,3 +342,54 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
+#elif defined(_WIN32)
+
+int main()
+{
+    if (initialize_logger(3))
+    {
+        std::cerr << "Failed to initialize logger." << std::endl;
+        return 1;
+    }
+
+    auto tracer = new_tracer();
+    if (tracer == nullptr)
+    {
+        std::cerr << "Failed to create tracer." << std::endl;
+        return 1;
+    }
+
+    for (int i = 0; i < 60; i++)
+    {
+        auto event = next_event(tracer, 1000);
+        if (event != nullptr)
+        {
+            if (event->variant == EventType::Violation)
+            {
+                std::cout << "Violation Event detected: PID " << event->pid
+                          << ", Name: " << reinterpret_cast<const char *>(event->name)
+                          << ", Metric: " << static_cast<int>(event->data.violation.metric)
+                          << ", Value: " << event->data.violation.value
+                          << ", Threshold: " << event->data.violation.threshold
+                          << std::endl;
+            }
+            else if (event->variant == EventType::NewProcess)
+            {
+                std::cout << "New Process Event detected: PID " << event->pid
+                          << ", Name: " << reinterpret_cast<const char *>(event->name)
+                          << std::endl;
+            }
+
+            drop_event(event);
+        }
+        else
+        {
+            std::cout << "No event received." << std::endl;
+        }
+    }
+
+    free_tracer(tracer);
+}
+
+#endif

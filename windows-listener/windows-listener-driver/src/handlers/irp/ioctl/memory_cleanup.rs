@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use core::ptr;
 use core::sync::atomic::Ordering;
 
+use ffi::win32::message::IOCTL_MEMORY_CLEANUP;
 use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP};
 
 use crate::error::RuntimeError;
@@ -16,7 +17,7 @@ pub struct MemoryCleanupHandler<'a> {
 }
 
 impl<'a> IoctlHandler<'a> for MemoryCleanupHandler<'a> {
-    const CODE: u32 = super::IOCTL_MEMORY_CLEANUP;
+    const CODE: u32 = IOCTL_MEMORY_CLEANUP;
 
     fn new(
         device: &'a DEVICE_OBJECT,
@@ -36,9 +37,7 @@ impl<'a> IoctlHandler<'a> for MemoryCleanupHandler<'a> {
         let old = ptr::null_mut();
         self._extension.shared_memory.swap(old, Ordering::SeqCst);
         if !old.is_null() {
-            unsafe {
-                let _ = Box::from_raw(old);
-            }
+            drop(unsafe { Box::from_raw(old) });
         }
 
         Ok(())

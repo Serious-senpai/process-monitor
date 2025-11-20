@@ -12,12 +12,12 @@ use core::panic::PanicInfo;
 use aya_ebpf::EbpfContext;
 use aya_ebpf::bindings::{BPF_F_NO_PREALLOC, BPF_NOEXIST};
 use aya_ebpf::helpers::bpf_ktime_get_ns;
-use aya_ebpf::macros::{kretprobe, map, tracepoint};
+use aya_ebpf::macros::{fexit, kretprobe, map};
 use aya_ebpf::maps::{HashMap, LruHashMap, RingBuf};
-use aya_ebpf::programs::{RetProbeContext, TracePointContext};
+use aya_ebpf::programs::{FExitContext, RetProbeContext};
 use aya_log_ebpf::{debug, warn};
-use linux_listener_common::linux::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
-use linux_listener_common::{
+use ffi::linux::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
+use ffi::{
     Event, EventData, EventType, Metric, NewProcess, StaticCommandName, Threshold, Violation,
 };
 
@@ -31,11 +31,11 @@ static NAMES: HashMap<StaticCommandName, Threshold> =
 static NETWORK_IO: LruHashMap<(StaticCommandName, u32), u64> =
     LruHashMap::with_max_entries(MAX_PROCESS_COUNT, 0);
 
-/// - **32-bit high:** timestamp of last measurement (in milliseconds)
-/// - **32-bit low:** accumulated transfered bytes
-#[map]
-static DISK_IO: LruHashMap<(StaticCommandName, u32), u64> =
-    LruHashMap::with_max_entries(MAX_PROCESS_COUNT, 0);
+// /// - **32-bit high:** timestamp of last measurement (in milliseconds)
+// /// - **32-bit low:** accumulated transfered bytes
+// #[map]
+// static DISK_IO: LruHashMap<(StaticCommandName, u32), u64> =
+//     LruHashMap::with_max_entries(MAX_PROCESS_COUNT, 0);
 
 #[map]
 static EVENTS: RingBuf = RingBuf::with_byte_size(RING_BUFFER_SIZE, 0);
@@ -152,9 +152,33 @@ fn _update_io_usage<T: EbpfContext>(
 // View probable kernel functions using `sudo cat /proc/kallsyms`.
 // Nah, just look at the kernel source.
 
-#[kretprobe]
-pub fn kretprobe_network_hook(ctx: RetProbeContext) -> u32 {
-    let size = ctx.ret::<i32>().clamp(0, i32::MAX) as u64 & 0xFFFFFFFF;
+// #[kretprobe]
+// pub fn kretprobe_network_hook(ctx: RetProbeContext) -> u32 {
+//     let size = ctx.ret::<i32>().clamp(0, i32::MAX) as u64 & 0xFFFFFFFF;
+//     if size == 0 {
+//         return 0;
+//     }
+
+//     _update_io_usage(ctx, &NETWORK_IO, size, Metric::Network);
+
+//     0
+// }
+
+#[fexit]
+pub fn fexit_sock_sendmsg_hook(ctx: FExitContext) -> i32 {
+    let size = ctx.arg::<i32>(2).clamp(0, i32::MAX) as u64 & 0xFFFFFFFF;
+    if size == 0 {
+        return 0;
+    }
+
+    _update_io_usage(ctx, &NETWORK_IO, size, Metric::Network);
+
+    0
+}
+
+#[fexit]
+pub fn fexit_sock_recvmsg_hook(ctx: FExitContext) -> i32 {
+    let size = ctx.arg::<i32>(3).clamp(0, i32::MAX) as u64 & 0xFFFFFFFF;
     if size == 0 {
         return 0;
     }
@@ -171,17 +195,17 @@ pub fn kretprobe_network_hook(ctx: RetProbeContext) -> u32 {
 
 // View tracepoints using `sudo ls /sys/kernel/debug/tracing/events`.
 
-#[tracepoint]
-pub fn tracepoint_disk_hook(ctx: TracePointContext) -> u32 {
-    let nr_sector = u64::from(unsafe { ctx.read_at::<u32>(24) }.unwrap_or_default());
-    if nr_sector == 0 {
-        return 0;
-    }
+// #[tracepoint]
+// pub fn tracepoint_disk_hook(ctx: TracePointContext) -> u32 {
+//     let nr_sector = u64::from(unsafe { ctx.read_at::<u32>(24) }.unwrap_or_default());
+//     if nr_sector == 0 {
+//         return 0;
+//     }
 
-    _update_io_usage(ctx, &DISK_IO, nr_sector * 512, Metric::Disk);
+//     _update_io_usage(ctx, &DISK_IO, nr_sector * 512, Metric::Disk);
 
-    0
-}
+//     0
+// }
 
 // View LSM hooks at https://elixir.bootlin.com/linux/latest/source/include/linux/lsm_hook_defs.h
 
@@ -203,7 +227,7 @@ pub fn kretprobe_process_creation(ctx: RetProbeContext) -> u32 {
                 let key = (name, pid);
                 let timestamp_ms = unsafe { bpf_ktime_get_ns() / 1_000_000 } & 0xFFFFFFFF;
                 let _ = NETWORK_IO.insert(&key, timestamp_ms << 32, BPF_NOEXIST as _);
-                let _ = DISK_IO.insert(&key, timestamp_ms << 32, BPF_NOEXIST as _);
+                // let _ = DISK_IO.insert(&key, timestamp_ms << 32, BPF_NOEXIST as _);
 
                 match EVENTS.reserve::<Event>(0) {
                     Some(mut entry) => {

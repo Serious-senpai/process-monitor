@@ -1,7 +1,8 @@
 use alloc::boxed::Box;
 use core::sync::atomic::Ordering;
 
-use wdk_sys::{DEVICE_OBJECT, HANDLE, IO_STACK_LOCATION, IRP, STATUS_INVALID_PARAMETER};
+use ffi::win32::message::{IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
+use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP, STATUS_INVALID_PARAMETER};
 
 use crate::error::RuntimeError;
 use crate::handlers::DeviceExtension;
@@ -9,12 +10,6 @@ use crate::handlers::irp::ioctl::IoctlHandler;
 use crate::mpsc::UserChannelMap;
 use crate::state::SharedMemory;
 use crate::wrappers::user_object::UserEventObject;
-
-#[repr(C)]
-pub struct MemoryInitializeMessage {
-    pub section: HANDLE,
-    pub event: HANDLE,
-}
 
 pub struct MemoryInitializeHandler<'a> {
     _device: &'a DEVICE_OBJECT,
@@ -25,7 +20,7 @@ pub struct MemoryInitializeHandler<'a> {
 }
 
 impl<'a> IoctlHandler<'a> for MemoryInitializeHandler<'a> {
-    const CODE: u32 = super::IOCTL_MEMORY_INITIALIZE;
+    const CODE: u32 = IOCTL_MEMORY_INITIALIZE;
 
     fn new(
         device: &'a DEVICE_OBJECT,
@@ -44,12 +39,12 @@ impl<'a> IoctlHandler<'a> for MemoryInitializeHandler<'a> {
     }
 
     fn handle(&mut self) -> Result<(), RuntimeError> {
-        if self._input_length != size_of::<MemoryInitializeMessage>() {
+        if self._input_length != size_of::<MemoryInitialize>() {
             return Err(RuntimeError::Failure(STATUS_INVALID_PARAMETER));
         }
 
         let input = match unsafe {
-            let ptr = self._irp.AssociatedIrp.SystemBuffer as *const MemoryInitializeMessage;
+            let ptr = self._irp.AssociatedIrp.SystemBuffer as *const MemoryInitialize;
             ptr.as_ref()
         } {
             Some(input) => input,
@@ -67,9 +62,7 @@ impl<'a> IoctlHandler<'a> for MemoryInitializeHandler<'a> {
             .swap(shared_memory, Ordering::SeqCst);
 
         if !old.is_null() {
-            unsafe {
-                let _ = Box::from_raw(old);
-            }
+            drop(unsafe { Box::from_raw(old) });
         }
 
         Ok(())

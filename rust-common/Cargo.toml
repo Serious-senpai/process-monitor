@@ -1,30 +1,16 @@
 [workspace]
 resolver = "2"
-members = [
-    "linux-listener",
-    "linux-listener-ebpf",
-]
-default-members = ["linux-listener"]
+members = ["cbindgen-base", "ffi"]
+default-members = ["cbindgen-base", "ffi"]
 
 [workspace.package]
-version = "0.1.0"
-authors = ["Serious-senpai"]
 edition = "2024"
 
 [workspace.dependencies]
 anyhow = { version = "1.0.100", default-features = false }
 aya = { git = "https://github.com/aya-rs/aya", default-features = false }
-aya-build = { git = "https://github.com/aya-rs/aya", default-features = false }
-aya-ebpf = { git = "https://github.com/aya-rs/aya", default-features = false }
-aya-log = { git = "https://github.com/aya-rs/aya", default-features = false }
-aya-log-ebpf = { git = "https://github.com/aya-rs/aya", default-features = false }
-cargo_metadata = { version = "0.23.0", default-features = false }
-cbindgen-base = { path = "../rust-common/cbindgen-base", default-features = false }
-ffi = { path = "../rust-common/ffi", default-features = false }
-libc = { version = "0.2.177", default-features = false }
-log = { version = "0.4.22", default-features = false }
-simplelog = { version = "0.12.2", default-features = false }
-which = { version = "6.0.0", default-features = false }
+cbindgen = { version = "0.29.2", default-features = false }
+wdk-sys = { version = "0.5.1", default-features = false }
 
 [workspace.lints.clippy]
 absolute_paths = "warn"
@@ -53,7 +39,3 @@ too_many_arguments = "allow"
 trait_duplication_in_bounds = "warn"
 use_self = "warn"
 wildcard_imports = "warn"
-
-[profile.release.package.linux-listener-ebpf]
-debug = 0
-codegen-units = 1
