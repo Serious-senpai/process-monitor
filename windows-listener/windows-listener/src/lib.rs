@@ -3,7 +3,7 @@ use std::fs::OpenOptions;
 use std::os::windows::io::IntoRawHandle;
 use std::{io, ptr, slice};
 
-use ffi::win32::message::{IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
+use ffi::win32::message::{IOCTL_CLEAR_MONITOR, IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
 use ffi::win32::mpsc::DefaultChannel;
 use ffi::{Event, Threshold};
 use log::{LevelFilter, error};
@@ -185,7 +185,23 @@ pub unsafe extern "C" fn set_monitor(
 /// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_int {
-    1
+    let tracer = tracer as *mut _KernelTracer;
+    match unsafe { tracer.as_ref() } {
+        Some(tracer) => unsafe {
+            DeviceIoControl(
+                tracer.device,
+                IOCTL_CLEAR_MONITOR,
+                None,
+                0,
+                None,
+                0,
+                None,
+                None,
+            )
+        }
+        .is_err() as c_int,
+        None => 1,
+    }
 }
 
 /// # Safety

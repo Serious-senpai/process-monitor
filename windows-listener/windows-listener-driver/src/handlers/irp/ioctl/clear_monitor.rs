@@ -1,23 +1,23 @@
 use alloc::boxed::Box;
-use core::ptr;
 use core::sync::atomic::Ordering;
 
-use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP, IRP_MJ_CLOSE};
+use ffi::win32::message::{IOCTL_CLEAR_MONITOR, MemoryInitialize};
+use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP, STATUS_INVALID_PARAMETER};
 
 use crate::error::RuntimeError;
-use crate::handlers::irp::IrpHandler;
-use crate::log;
-use crate::state::DeviceExtension;
+use crate::handlers::DeviceExtension;
+use crate::handlers::irp::ioctl::IoctlHandler;
 
-pub struct CloseHandler<'a> {
+pub struct ClearMonitorHandler<'a> {
     _device: &'a DEVICE_OBJECT,
     _extension: &'a DeviceExtension,
     _irp: &'a mut IRP,
     _irpsp: &'a mut IO_STACK_LOCATION,
+    _input_length: usize,
 }
 
-impl<'a> IrpHandler<'a> for CloseHandler<'a> {
-    const CODE: u32 = IRP_MJ_CLOSE;
+impl<'a> IoctlHandler<'a> for ClearMonitorHandler<'a> {
+    const CODE: u32 = IOCTL_CLEAR_MONITOR;
 
     fn new(
         device: &'a DEVICE_OBJECT,
@@ -25,24 +25,19 @@ impl<'a> IrpHandler<'a> for CloseHandler<'a> {
         irp: &'a mut IRP,
         irpsp: &'a mut IO_STACK_LOCATION,
     ) -> Result<Self, RuntimeError> {
+        let input_length = unsafe { irpsp.Parameters.DeviceIoControl.InputBufferLength };
         Ok(Self {
             _device: device,
             _extension: extension,
             _irp: irp,
             _irpsp: irpsp,
+            _input_length: input_length.try_into()?,
         })
     }
 
     fn handle(&mut self) -> Result<(), RuntimeError> {
-        self._irp.IoStatus.Information = 0;
-
-        let old = self
-            ._extension
-            .shared_memory
-            .swap(ptr::null_mut(), Ordering::SeqCst);
-        if !old.is_null() {
-            drop(unsafe { Box::from_raw(old) });
-        }
+        let mut threshold = self._extension.thresholds.acquire();
+        threshold.clear();
 
         Ok(())
     }

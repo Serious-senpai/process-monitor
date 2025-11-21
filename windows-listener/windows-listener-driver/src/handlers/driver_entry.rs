@@ -1,3 +1,4 @@
+use alloc::collections::btree_map::BTreeMap;
 use core::mem::size_of;
 use core::ptr;
 use core::sync::atomic::{AtomicPtr, Ordering};
@@ -15,6 +16,7 @@ use crate::handlers::delete_device;
 use crate::handlers::process_notify::process_notify;
 use crate::log;
 use crate::state::DeviceExtension;
+use crate::wrappers::lock::SpinLock;
 use crate::wrappers::safety::{add_create_process_notify, create_symbolic_link};
 use crate::wrappers::strings::UnicodeString;
 
@@ -63,6 +65,7 @@ pub fn driver_entry(
                 device.DeviceExtension as *mut DeviceExtension,
                 DeviceExtension {
                     shared_memory: AtomicPtr::new(ptr::null_mut()),
+                    thresholds: SpinLock::new(BTreeMap::new()),
                 },
             );
         }

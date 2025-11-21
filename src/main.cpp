@@ -360,7 +360,7 @@ int main()
         return 1;
     }
 
-    for (int i = 0; i < 60; i++)
+    while (true)
     {
         auto event = next_event(tracer, 1000);
         if (event != nullptr)

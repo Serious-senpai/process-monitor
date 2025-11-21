@@ -1,5 +1,7 @@
+mod clear_monitor;
 mod memory_initialize;
 
+use clear_monitor::ClearMonitorHandler;
 use memory_initialize::MemoryInitializeHandler;
 use wdk_sys::{
     DEVICE_OBJECT, IO_STACK_LOCATION, IRP, IRP_MJ_DEVICE_CONTROL, STATUS_INVALID_DEVICE_REQUEST,
@@ -93,6 +95,7 @@ impl<'a> IrpHandler<'a> for DeviceControlHandler<'a> {
             self._extension,
             self._irp,
             self._irpsp,
+            ClearMonitorHandler,
             MemoryInitializeHandler,
         )
     }
