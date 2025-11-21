@@ -3,7 +3,7 @@ use std::fs::OpenOptions;
 use std::os::windows::io::IntoRawHandle;
 use std::{io, ptr, slice};
 
-use ffi::win32::message::{IOCTL_MEMORY_CLEANUP, IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
+use ffi::win32::message::{IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
 use ffi::win32::mpsc::DefaultChannel;
 use ffi::{Event, Threshold};
 use log::{LevelFilter, error};
@@ -30,20 +30,10 @@ impl Drop for _MappedMemoryGuard {
     }
 }
 
-struct _DeviceGuard(HANDLE);
-
-impl Drop for _DeviceGuard {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = DeviceIoControl(self.0, IOCTL_MEMORY_CLEANUP, None, 0, None, 0, None, None);
-        }
-    }
-}
-
 struct _KernelTracer {
     pub hmap: HANDLE,
     pub base: _MappedMemoryGuard,
-    pub device: _DeviceGuard,
+    pub device: HANDLE,
     pub event: HANDLE,
 }
 
@@ -130,7 +120,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
 
     match OpenOptions::new().read(true).write(true).open(DEVICE_NAME) {
         Ok(file) => {
-            let device = _DeviceGuard(HANDLE(file.into_raw_handle()));
+            let device = HANDLE(file.into_raw_handle());
             let message = MemoryInitialize {
                 section: hmap.0,
                 event: event.0,
@@ -138,7 +128,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
 
             if let Err(e) = unsafe {
                 DeviceIoControl(
-                    device.0,
+                    device,
                     IOCTL_MEMORY_INITIALIZE,
                     Some(&message as *const _ as *const c_void),
                     size_of::<MemoryInitialize>() as _,

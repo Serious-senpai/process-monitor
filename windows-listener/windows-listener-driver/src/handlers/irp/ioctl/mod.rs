@@ -1,7 +1,5 @@
-mod memory_cleanup;
 mod memory_initialize;
 
-use memory_cleanup::MemoryCleanupHandler;
 use memory_initialize::MemoryInitializeHandler;
 use wdk_sys::{
     DEVICE_OBJECT, IO_STACK_LOCATION, IRP, IRP_MJ_DEVICE_CONTROL, STATUS_INVALID_DEVICE_REQUEST,
@@ -95,7 +93,6 @@ impl<'a> IrpHandler<'a> for DeviceControlHandler<'a> {
             self._extension,
             self._irp,
             self._irpsp,
-            MemoryCleanupHandler,
             MemoryInitializeHandler,
         )
     }
