@@ -26,8 +26,10 @@ impl<const N: usize> Channel<N> {
         }
     }
 
+    /// # Safety
+    /// There must be at most one reader at a time.
     #[cfg(feature = "win32-user")]
-    pub fn read(&self, buffer: &mut [u8]) -> usize {
+    pub unsafe fn read(&self, buffer: &mut [u8]) -> usize {
         let write_commit = self._write_commit.load(Ordering::Acquire);
         let read = self._read.load(Ordering::Relaxed);
 

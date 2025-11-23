@@ -122,7 +122,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
         Ok(file) => {
             let device = HANDLE(file.into_raw_handle());
             let message = MemoryInitialize {
-                section: hmap.0,
+                mapping: hmap.0,
                 event: event.0,
             };
 
@@ -225,7 +225,10 @@ pub unsafe extern "C" fn next_event(
             let mut buffer = unsafe {
                 slice::from_raw_parts_mut(event.as_mut_ptr() as *mut u8, size_of::<Event>())
             };
-            channel.read(&mut buffer);
+            unsafe {
+                // TODO: Prevent concurrent reads?
+                channel.read(&mut buffer);
+            }
 
             let event = unsafe { event.assume_init() };
             Box::into_raw(event)

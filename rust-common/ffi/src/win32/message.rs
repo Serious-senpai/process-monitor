@@ -12,7 +12,13 @@ pub const IOCTL_MEMORY_INITIALIZE: u32 =
 pub const IOCTL_CLEAR_MONITOR: u32 =
     _ctl_code(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS);
 
+/// Message structure to be sent during [`IOCTL_MEMORY_INITIALIZE`]
 pub struct MemoryInitialize {
-    pub section: HANDLE,
+    /// Handle to the mapping object obtained via
+    /// [`CreateFileMappingW`](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-createfilemappingw)
+    pub mapping: HANDLE,
+
+    /// Handle to the event object obtained via
+    /// [`CreateEventW`](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createeventw)
     pub event: HANDLE,
 }
