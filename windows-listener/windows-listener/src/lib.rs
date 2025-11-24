@@ -2,11 +2,12 @@ use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_void};
 use std::fs::OpenOptions;
 use std::os::windows::io::IntoRawHandle;
+use std::sync::Mutex;
 use std::{io, ptr};
 
 use ffi::win32::event::WindowsEvent;
 use ffi::win32::message::{IOCTL_CLEAR_MONITOR, IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
-use ffi::win32::mpsc::DefaultChannel;
+use ffi::win32::mpsc::{DEFAULT_CHANNEL_SIZE, DefaultChannel};
 use ffi::{Event, Threshold};
 use log::{LevelFilter, error};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
@@ -37,7 +38,7 @@ struct _KernelTracer {
     pub base: _MappedMemoryGuard,
     pub device: HANDLE,
     pub event: HANDLE,
-    pub reading: VecDeque<u8>,
+    pub reading: Mutex<VecDeque<u8>>,
 }
 
 pub struct KernelTracerHandle {
@@ -150,7 +151,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
                 base,
                 device,
                 event,
-                reading: VecDeque::new(),
+                reading: Mutex::new(VecDeque::new()),
             });
             Box::into_raw(tracer) as *mut KernelTracerHandle
         }
@@ -189,7 +190,7 @@ pub unsafe extern "C" fn set_monitor(
 /// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_int {
-    let tracer = tracer as *mut _KernelTracer;
+    let tracer = tracer as *const _KernelTracer;
     match unsafe { tracer.as_ref() } {
         Some(tracer) => unsafe {
             DeviceIoControl(
@@ -209,50 +210,57 @@ pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_i
 }
 
 /// # Safety
-/// The provided pointer must be null or a valid pointer obtained from [`new_tracer`]. If this function
-/// is called concurrently from multiple threads with the same `tracer`, the behavior is undefined.
+/// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn next_event(
-    tracer: *mut KernelTracerHandle,
+    tracer: *const KernelTracerHandle,
     timeout_ms: u32,
 ) -> *mut Event {
-    let tracer = tracer as *mut _KernelTracer;
-    match unsafe { tracer.as_mut() } {
+    let tracer = tracer as *const _KernelTracer;
+    match unsafe { tracer.as_ref() } {
         Some(tracer) => {
-            let mut buffer = [0u8; 1024];
+            let mut buffer = [0u8; DEFAULT_CHANNEL_SIZE / 4];
             loop {
-                if unsafe { WaitForSingleObject(tracer.event, timeout_ms) } != WAIT_OBJECT_0 {
-                    return ptr::null_mut();
-                }
+                match tracer.reading.lock() {
+                    Ok(mut reading) => {
+                        if unsafe { WaitForSingleObject(tracer.event, timeout_ms) } != WAIT_OBJECT_0
+                        {
+                            return ptr::null_mut();
+                        }
 
-                let channel = tracer.base.0.Value as *const DefaultChannel;
-                let channel = unsafe { &*channel };
+                        let channel = tracer.base.0.Value as *const DefaultChannel;
+                        let channel = unsafe { &*channel };
 
-                let size = unsafe {
-                    // Safety: It is the caller's responsibility to ensure that the function is not called
-                    // concurrently from multiple threads with the same `tracer`.
-                    channel.read(&mut buffer)
-                };
+                        let size = unsafe {
+                            // Safety: The `tracer.reading` mutex above ensures that there is only one reader at a time.
+                            channel.read(&mut buffer)
+                        };
 
-                let base_index = tracer.reading.len();
-                let mut complete_index = usize::MAX;
-                for (index, &byte) in buffer[..size].iter().enumerate() {
-                    tracer.reading.push_back(byte);
-                    if byte == 0 {
-                        complete_index = base_index + index;
+                        let base_index = reading.len();
+                        let mut complete_index = usize::MAX;
+                        for (index, &byte) in buffer[..size].iter().enumerate() {
+                            reading.push_back(byte);
+                            if byte == 0 {
+                                complete_index = base_index + index;
+                            }
+                        }
+
+                        if complete_index != usize::MAX {
+                            let mut data = reading.drain(..=complete_index).collect::<Vec<u8>>();
+                            match postcard::from_bytes_cobs::<WindowsEvent>(&mut data) {
+                                Ok(event) => {
+                                    let boxed = Box::new(event.into());
+                                    return Box::into_raw(boxed);
+                                }
+                                Err(e) => {
+                                    error!("Failed to deserialize event: {e}");
+                                }
+                            }
+                        }
                     }
-                }
-
-                if complete_index != usize::MAX {
-                    let mut data = tracer.reading.drain(..=complete_index).collect::<Vec<u8>>();
-                    match postcard::from_bytes_cobs::<WindowsEvent>(&mut data) {
-                        Ok(event) => {
-                            let boxed = Box::new(event.into());
-                            return Box::into_raw(boxed);
-                        }
-                        Err(e) => {
-                            error!("Failed to deserialize event: {e}");
-                        }
+                    Err(e) => {
+                        error!("Poisoned mutex: {e}");
+                        return ptr::null_mut();
                     }
                 }
             }

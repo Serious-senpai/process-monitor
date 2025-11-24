@@ -154,4 +154,5 @@ impl<const N: usize> Channel<N> {
     }
 }
 
-pub type DefaultChannel = Channel<4096>;
+pub const DEFAULT_CHANNEL_SIZE: usize = 4096;
+pub type DefaultChannel = Channel<DEFAULT_CHANNEL_SIZE>;
