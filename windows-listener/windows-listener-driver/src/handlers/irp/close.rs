@@ -6,7 +6,6 @@ use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP, IRP_MJ_CLOSE};
 
 use crate::error::RuntimeError;
 use crate::handlers::irp::IrpHandler;
-use crate::log;
 use crate::state::DeviceExtension;
 
 pub struct CloseHandler<'a> {

@@ -52,7 +52,7 @@ impl<'a> IoctlHandler<'a> for MemoryInitializeHandler<'a> {
         };
 
         let shared_memory = Box::into_raw(Box::new(SharedMemory {
-            queue: UserChannelMap::from_userspace(input.section)?,
+            queue: UserChannelMap::from_userspace(input.mapping)?,
             event: UserEventObject::from_userspace(input.event)?,
         }));
 

@@ -362,7 +362,7 @@ int main()
 
     while (true)
     {
-        auto event = next_event(tracer, 1000);
+        auto event = next_event(tracer, INFINITE);
         if (event != nullptr)
         {
             if (event->variant == EventType::Violation)

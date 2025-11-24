@@ -1,8 +1,10 @@
+use alloc::string::ToString;
 use core::ffi::{CStr, c_void};
 use core::sync::atomic::Ordering;
 use core::{ptr, slice};
 
-use ffi::{Event, EventData, EventType, NewProcess, StaticCommandName};
+use ffi::NewProcess;
+use ffi::win32::event::{WindowsEvent, WindowsEventData};
 use wdk::nt_success;
 use wdk_sys::ntddk::{ObfDereferenceObject, PsLookupProcessByProcessId};
 use wdk_sys::{BOOLEAN, HANDLE, PEPROCESS};
@@ -62,21 +64,23 @@ pub unsafe extern "C" fn process_notify(_: HANDLE, process_id: HANDLE, create: B
             unsafe { CStr::from_ptr(PsGetProcessImageFileName(*process.ptr()) as *const _) }
                 .to_str()
         {
-            let event = Event {
+            let event = WindowsEvent {
                 pid: process_id as _,
-                name: StaticCommandName::from(name),
-                variant: EventType::NewProcess,
-                data: EventData {
-                    new_process: NewProcess {},
-                },
+                name: name.to_string(),
+                data: WindowsEventData::NewProcess(NewProcess {}),
             };
 
-            if let Err(e) = inner.queue.send(unsafe {
-                slice::from_raw_parts(&event as *const _ as *const u8, size_of::<Event>())
-            }) {
-                log!("Failed to write data to shared memory queue: {e}");
-            } else {
-                inner.event.set();
+            match postcard::to_allocvec_cobs(&event) {
+                Ok(data) => {
+                    if let Err(e) = inner.queue.send(&data) {
+                        log!("Failed to write data to shared memory queue: {e}");
+                    } else {
+                        inner.event.set();
+                    }
+                }
+                Err(e) => {
+                    log!("Failed to serialize {event:?}: {e}");
+                }
             }
         }
     }

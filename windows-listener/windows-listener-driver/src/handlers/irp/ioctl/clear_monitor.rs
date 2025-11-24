@@ -1,8 +1,5 @@
-use alloc::boxed::Box;
-use core::sync::atomic::Ordering;
-
-use ffi::win32::message::{IOCTL_CLEAR_MONITOR, MemoryInitialize};
-use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP, STATUS_INVALID_PARAMETER};
+use ffi::win32::message::IOCTL_CLEAR_MONITOR;
+use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP};
 
 use crate::error::RuntimeError;
 use crate::handlers::DeviceExtension;

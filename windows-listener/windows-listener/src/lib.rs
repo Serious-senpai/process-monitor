@@ -1,8 +1,10 @@
+use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_void};
 use std::fs::OpenOptions;
 use std::os::windows::io::IntoRawHandle;
-use std::{io, ptr, slice};
+use std::{io, ptr};
 
+use ffi::win32::event::WindowsEvent;
 use ffi::win32::message::{IOCTL_CLEAR_MONITOR, IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
 use ffi::win32::mpsc::DefaultChannel;
 use ffi::{Event, Threshold};
@@ -35,6 +37,7 @@ struct _KernelTracer {
     pub base: _MappedMemoryGuard,
     pub device: HANDLE,
     pub event: HANDLE,
+    pub reading: VecDeque<u8>,
 }
 
 pub struct KernelTracerHandle {
@@ -147,6 +150,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
                 base,
                 device,
                 event,
+                reading: VecDeque::new(),
             });
             Box::into_raw(tracer) as *mut KernelTracerHandle
         }
@@ -205,33 +209,53 @@ pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_i
 }
 
 /// # Safety
-/// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
+/// The provided pointer must be null or a valid pointer obtained from [`new_tracer`]. If this function
+/// is called concurrently from multiple threads with the same `tracer`, the behavior is undefined.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn next_event(
-    tracer: *const KernelTracerHandle,
+    tracer: *mut KernelTracerHandle,
     timeout_ms: u32,
 ) -> *mut Event {
     let tracer = tracer as *mut _KernelTracer;
-    match unsafe { tracer.as_ref() } {
+    match unsafe { tracer.as_mut() } {
         Some(tracer) => {
-            if unsafe { WaitForSingleObject(tracer.event, timeout_ms) } != WAIT_OBJECT_0 {
-                return ptr::null_mut();
+            let mut buffer = [0u8; 1024];
+            loop {
+                if unsafe { WaitForSingleObject(tracer.event, timeout_ms) } != WAIT_OBJECT_0 {
+                    return ptr::null_mut();
+                }
+
+                let channel = tracer.base.0.Value as *const DefaultChannel;
+                let channel = unsafe { &*channel };
+
+                let size = unsafe {
+                    // Safety: It is the caller's responsibility to ensure that the function is not called
+                    // concurrently from multiple threads with the same `tracer`.
+                    channel.read(&mut buffer)
+                };
+
+                let base_index = tracer.reading.len();
+                let mut complete_index = usize::MAX;
+                for (index, &byte) in buffer[..size].iter().enumerate() {
+                    tracer.reading.push_back(byte);
+                    if byte == 0 {
+                        complete_index = base_index + index;
+                    }
+                }
+
+                if complete_index != usize::MAX {
+                    let mut data = tracer.reading.drain(..=complete_index).collect::<Vec<u8>>();
+                    match postcard::from_bytes_cobs::<WindowsEvent>(&mut data) {
+                        Ok(event) => {
+                            let boxed = Box::new(event.into());
+                            return Box::into_raw(boxed);
+                        }
+                        Err(e) => {
+                            error!("Failed to deserialize event: {e}");
+                        }
+                    }
+                }
             }
-
-            let channel = tracer.base.0.Value as *const DefaultChannel;
-            let channel = unsafe { &*channel };
-
-            let mut event = Box::<Event>::new_uninit();
-            let mut buffer = unsafe {
-                slice::from_raw_parts_mut(event.as_mut_ptr() as *mut u8, size_of::<Event>())
-            };
-            unsafe {
-                // TODO: Prevent concurrent reads?
-                channel.read(&mut buffer);
-            }
-
-            let event = unsafe { event.assume_init() };
-            Box::into_raw(event)
         }
         None => ptr::null_mut(),
     }

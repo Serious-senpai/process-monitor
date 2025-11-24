@@ -6,7 +6,11 @@ pub mod linux;
 #[cfg(feature = "win32-kernel")]
 pub mod win32;
 
+extern crate alloc;
+
 use core::{fmt, str};
+
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "linux-kernel")]
 pub const COMMAND_LENGTH: usize = 16; // aya_ebpf::TASK_COMM_LEN
@@ -23,8 +27,8 @@ pub struct Threshold {
 #[cfg(feature = "linux-user")]
 unsafe impl aya::Pod for Threshold {}
 
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Metric {
     Cpu = 0,
     Memory = 1,
@@ -33,7 +37,7 @@ pub enum Metric {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StaticCommandName(pub [u8; COMMAND_LENGTH]);
 
 #[cfg(feature = "linux-user")]
@@ -61,7 +65,7 @@ impl fmt::Display for StaticCommandName {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct Violation {
     pub metric: Metric,
     pub value: u32,
@@ -69,7 +73,7 @@ pub struct Violation {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct NewProcess;
 
 #[repr(C)]
@@ -79,8 +83,8 @@ pub union EventData {
     pub new_process: NewProcess,
 }
 
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum EventType {
     Violation = 0,
     NewProcess = 1,
