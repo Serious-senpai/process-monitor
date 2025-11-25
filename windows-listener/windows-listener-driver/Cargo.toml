@@ -18,6 +18,22 @@ wdk-alloc = { workspace = true }
 wdk-panic = { workspace = true }
 wdk-sys = { workspace = true }
 
+# The reason we use `windows` here is because `wdk-sys` has yet to have bindings for minifilter
+# APIs (fltkernel.h). Hopefully one day any of these PRs will get merged?
+# - https://github.com/microsoft/windows-drivers-rs/pull/337
+# - https://github.com/microsoft/windows-drivers-rs/pull/359
+# See also `windows::Wdk` vs `wdk-sys`: https://github.com/microsoft/windows-drivers-rs/discussions/20
+windows = { workspace = true, features = [
+    "Win32_Security",
+    "Win32_Storage_InstallableFileSystems",
+    "Win32_System_IO",
+    "Win32_System_Kernel",
+    "Win32_System_Power",
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem_Minifilters",
+    "Wdk_System_SystemServices",
+] }
+
 [build-dependencies]
 wdk-build = { workspace = true }
 

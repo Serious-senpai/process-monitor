@@ -30,14 +30,22 @@ windows_listener_driver.sys
 
 ; ================= Service installation =================
 [WindowsListenerDevice.Services]
-AddService = WindowsListenerService, %SPSVCINST_ASSOCSERVICE%, WindowsListenerServiceInstall
+AddService = WindowsListenerService, %SPSVCINST_ASSOCSERVICE%, WindowsListenerDevice.Service
 
-[WindowsListenerServiceInstall]
+[WindowsListenerDevice.Service]
 DisplayName    = %ServiceDesc%
-ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
-StartType      = 3               ; SERVICE_DEMAND_START - good for development, change to 2 to start on boot
-ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+Dependencies   = "FltMgr"                         ; required for minifilter
+ServiceType    = 1                                ; SERVICE_KERNEL_DRIVER
+StartType      = 3                                ; SERVICE_DEMAND_START - good for development, change to 2 to start on boot
+ErrorControl   = 1                                ; SERVICE_ERROR_NORMAL
 ServiceBinary  = %13%\windows_listener_driver.sys
+AddReg         = WindowsListenerDevice.AddRegistry
+
+[WindowsListenerDevice.AddRegistry]
+HKR,"Parameters","SupportedFeatures",0x00010001,0x3
+HKR,"Parameters\Instances","DefaultInstance",0x00000000,%DefaultInstance%
+HKR,"Parameters\Instances\"%InstanceName%,"Altitude",0x00000000,%InstanceAltitude%
+HKR,"Parameters\Instances\"%InstanceName%,"Flags",0x00010001,%InstanceFlags%
 
 ; ================= Strings =================
 [Strings]
@@ -48,3 +56,8 @@ DiskId1                = "Windows Listener Installation Disk #1"
 DeviceDesc             = "Windows Listener Rust Device"
 ServiceDesc            = "Windows Listener Rust Service"
 ClassName              = "Windows Listener Device"
+
+DefaultInstance        = "Windows Listener Instance" ; required for minifilter
+InstanceName           = "Windows Listener Instance" ; required for minifilter
+InstanceAltitude       = "370030"                    ; required for minifilter
+InstanceFlags          = 0x0                         ; required for minifilter

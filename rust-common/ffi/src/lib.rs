@@ -37,7 +37,7 @@ pub enum Metric {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct StaticCommandName(pub [u8; COMMAND_LENGTH]);
 
 #[cfg(feature = "linux-user")]

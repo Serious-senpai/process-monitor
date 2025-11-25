@@ -1245,6 +1245,7 @@ dependencies = [
  "wdk-build",
  "wdk-panic",
  "wdk-sys",
+ "windows 0.62.2",
 ]
 
 [[package]]

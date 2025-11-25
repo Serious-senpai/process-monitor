@@ -1,8 +1,6 @@
-use wdk_sys::ntddk::{
-    IoCreateSymbolicLink, IoDeleteSymbolicLink, PsRemoveCreateThreadNotifyRoutine,
-    PsSetCreateProcessNotifyRoutine, PsSetCreateThreadNotifyRoutine,
-};
-use wdk_sys::{APC_LEVEL, BOOLEAN, HANDLE, NT_SUCCESS, PASSIVE_LEVEL};
+use wdk::nt_success;
+use wdk_sys::ntddk::{IoCreateSymbolicLink, IoDeleteSymbolicLink, PsSetCreateProcessNotifyRoutine};
+use wdk_sys::{BOOLEAN, HANDLE, PASSIVE_LEVEL};
 
 use crate::error::RuntimeError;
 use crate::wrappers::irql::irql_requires;
@@ -20,7 +18,7 @@ pub fn delete_symbolic_link(name: &UnicodeString) -> Result<(), RuntimeError> {
         // This implementation relies on the fact that `IoDeleteSymbolicLink` does not modify the string
         IoDeleteSymbolicLink(&mut value)
     };
-    if !NT_SUCCESS(status) {
+    if !nt_success(status) {
         return Err(RuntimeError::Failure(status));
     }
 
@@ -43,7 +41,7 @@ pub fn create_symbolic_link(
         // This implementation relies on the fact that `IoCreateSymbolicLink` does not modify the string
         IoCreateSymbolicLink(&mut sym_name, &mut dev_name)
     };
-    if !NT_SUCCESS(status) {
+    if !nt_success(status) {
         return Err(RuntimeError::Failure(status));
     }
 
@@ -56,7 +54,7 @@ fn _set_create_process_notify<const REMOVE: u8>(
     irql_requires(PASSIVE_LEVEL)?;
 
     let status = unsafe { PsSetCreateProcessNotifyRoutine(Some(handler), REMOVE) };
-    if !NT_SUCCESS(status) {
+    if !nt_success(status) {
         return Err(RuntimeError::Failure(status));
     }
 
@@ -75,33 +73,33 @@ pub fn remove_create_process_notify(
     _set_create_process_notify::<1>(handler)
 }
 
-fn _set_create_thread_notify<const REMOVE: bool>(
-    handler: unsafe extern "C" fn(HANDLE, HANDLE, BOOLEAN),
-) -> Result<(), RuntimeError> {
-    let status = unsafe {
-        if REMOVE {
-            PsRemoveCreateThreadNotifyRoutine(Some(handler))
-        } else {
-            PsSetCreateThreadNotifyRoutine(Some(handler))
-        }
-    };
-    if !NT_SUCCESS(status) {
-        return Err(RuntimeError::Failure(status));
-    }
+// fn _set_create_thread_notify<const REMOVE: bool>(
+//     handler: unsafe extern "C" fn(HANDLE, HANDLE, BOOLEAN),
+// ) -> Result<(), RuntimeError> {
+//     let status = unsafe {
+//         if REMOVE {
+//             PsRemoveCreateThreadNotifyRoutine(Some(handler))
+//         } else {
+//             PsSetCreateThreadNotifyRoutine(Some(handler))
+//         }
+//     };
+//     if !nt_success(status) {
+//         return Err(RuntimeError::Failure(status));
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-pub fn add_create_thread_notify(
-    handler: unsafe extern "C" fn(HANDLE, HANDLE, BOOLEAN),
-) -> Result<(), RuntimeError> {
-    irql_requires(PASSIVE_LEVEL)?;
-    _set_create_thread_notify::<false>(handler)
-}
+// pub fn add_create_thread_notify(
+//     handler: unsafe extern "C" fn(HANDLE, HANDLE, BOOLEAN),
+// ) -> Result<(), RuntimeError> {
+//     irql_requires(PASSIVE_LEVEL)?;
+//     _set_create_thread_notify::<false>(handler)
+// }
 
-pub fn remove_create_thread_notify(
-    handler: unsafe extern "C" fn(HANDLE, HANDLE, BOOLEAN),
-) -> Result<(), RuntimeError> {
-    irql_requires(APC_LEVEL)?;
-    _set_create_thread_notify::<true>(handler)
-}
+// pub fn remove_create_thread_notify(
+//     handler: unsafe extern "C" fn(HANDLE, HANDLE, BOOLEAN),
+// ) -> Result<(), RuntimeError> {
+//     irql_requires(APC_LEVEL)?;
+//     _set_create_thread_notify::<true>(handler)
+// }

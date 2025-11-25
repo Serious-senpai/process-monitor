@@ -21,6 +21,8 @@ use wdk_sys::{
 };
 
 use crate::error::RuntimeError;
+use crate::handlers::driver::{driver_entry as do_driver_entry, driver_unload as do_driver_unload};
+use crate::handlers::irp::irp_handler as do_irp_handler;
 use crate::state::DeviceExtension;
 use crate::wrappers::bindings::IoGetCurrentIrpStackLocation;
 use crate::wrappers::strings::UnicodeString;
@@ -39,7 +41,7 @@ unsafe extern "C" fn driver_unload(driver: PDRIVER_OBJECT) {
         }
     };
 
-    if let Err(e) = handlers::driver_unload(driver) {
+    if let Err(e) = do_driver_unload(driver) {
         log!("Error when unloading driver: {e}");
     }
 }
@@ -85,7 +87,7 @@ unsafe extern "C" fn irp_handler(device: PDEVICE_OBJECT, irp: PIRP) -> NTSTATUS 
 
     log!("Received IRP {}", irpsp.MajorFunction);
 
-    let status = match handlers::irp_handler(device, extension, irp, irpsp) {
+    let status = match do_irp_handler(device, extension, irp, irpsp) {
         Ok(()) => STATUS_SUCCESS,
         Err(e) => {
             log!("Error when handling IRP: {e}");
@@ -127,7 +129,7 @@ pub unsafe extern "C" fn driver_entry(
         }
     };
 
-    match handlers::driver_entry(driver, registry_path, driver_unload, irp_handler) {
+    match do_driver_entry(driver, registry_path, driver_unload, irp_handler) {
         Ok(()) => STATUS_SUCCESS,
         Err(e) => {
             log!("Error when loading driver: {e}");

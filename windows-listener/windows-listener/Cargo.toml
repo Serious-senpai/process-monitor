@@ -12,7 +12,7 @@ ffi = { workspace = true, features = ["win32-user"] }
 log = { workspace = true }
 postcard = { workspace = true, features = ["alloc"] }
 simplelog = { workspace = true, features = ["local-offset", "termcolor"] }
-windows = { workspace = true, features = ["Win32", "Win32_Security", "Win32_System", "Win32_System_IO", "Win32_System_Memory", "Win32_System_Threading"] }
+windows = { workspace = true, features = ["Win32_Security", "Win32_System_IO", "Win32_System_Memory", "Win32_System_Threading"] }
 
 [build-dependencies]
 anyhow = { workspace = true }

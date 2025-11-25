@@ -1,8 +1,10 @@
+use core::ffi::c_char;
+
 use wdk_sys::{PEPROCESS, PIO_STACK_LOCATION, PIRP};
 
 unsafe extern "C" {
     /// See also: https://blog.csdn.net/fearhacker/article/details/152052624 (Chinese)
-    pub unsafe fn PsGetProcessImageFileName(Process: PEPROCESS) -> *const u8;
+    pub unsafe fn PsGetProcessImageFileName(Process: PEPROCESS) -> *const c_char;
 }
 
 /// # Safety

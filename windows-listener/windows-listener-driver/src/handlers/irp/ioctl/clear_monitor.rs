@@ -1,8 +1,8 @@
 use ffi::win32::message::IOCTL_CLEAR_MONITOR;
 use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP};
 
+use crate::DeviceExtension;
 use crate::error::RuntimeError;
-use crate::handlers::DeviceExtension;
 use crate::handlers::irp::ioctl::IoctlHandler;
 
 pub struct ClearMonitorHandler<'a> {

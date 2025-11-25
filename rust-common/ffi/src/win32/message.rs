@@ -1,5 +1,7 @@
 use wdk_sys::{FILE_ANY_ACCESS, FILE_DEVICE_UNKNOWN, HANDLE, METHOD_BUFFERED};
 
+use crate::{StaticCommandName, Threshold};
+
 /// Port of the [`CTL_CODE`](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/d4drvif/nf-d4drvif-ctl_code) macro.
 ///
 /// See also: <https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/defining-i-o-control-codes>
@@ -11,6 +13,8 @@ pub const IOCTL_MEMORY_INITIALIZE: u32 =
     _ctl_code(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS);
 pub const IOCTL_CLEAR_MONITOR: u32 =
     _ctl_code(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS);
+pub const IOCTL_SET_MONITOR: u32 =
+    _ctl_code(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS);
 
 /// Message structure to be sent during [`IOCTL_MEMORY_INITIALIZE`]
 pub struct MemoryInitialize {
@@ -21,4 +25,13 @@ pub struct MemoryInitialize {
     /// Handle to the event object obtained via
     /// [`CreateEventW`](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createeventw)
     pub event: HANDLE,
+}
+
+/// Message structure to be sent during [`IOCTL_SET_MONITOR`]
+pub struct SetMonitor {
+    /// Name of the process to be monitored
+    pub name: StaticCommandName,
+
+    /// Threshold for the process
+    pub threshold: Threshold,
 }

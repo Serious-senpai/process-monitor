@@ -5,8 +5,9 @@ use core::fmt::{Debug, Display};
 use core::{fmt, slice};
 
 use ouroboros::self_referencing;
+use wdk::nt_success;
 use wdk_sys::ntddk::{RtlAnsiStringToUnicodeString, RtlInitAnsiString};
-use wdk_sys::{NT_SUCCESS, PASSIVE_LEVEL, PCUNICODE_STRING, STRING, UNICODE_STRING};
+use wdk_sys::{PASSIVE_LEVEL, PCUNICODE_STRING, STRING, UNICODE_STRING};
 
 use crate::displayer::ForeignDisplayer;
 use crate::error::RuntimeError;
@@ -80,7 +81,7 @@ impl TryFrom<&AnsiString> for UnicodeString {
             RtlAnsiStringToUnicodeString(&mut native, value, 0)
         };
 
-        if !NT_SUCCESS(status) {
+        if !nt_success(status) {
             return Err(RuntimeError::Failure(status));
         }
 

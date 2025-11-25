@@ -1,17 +1,11 @@
-use alloc::boxed::Box;
-use core::sync::atomic::Ordering;
-
-use ffi::win32::message::{IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
+use ffi::win32::message::{IOCTL_SET_MONITOR, SetMonitor};
 use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP, STATUS_INVALID_PARAMETER};
 
 use crate::DeviceExtension;
 use crate::error::RuntimeError;
 use crate::handlers::irp::ioctl::IoctlHandler;
-use crate::mpsc::UserChannelMap;
-use crate::state::SharedMemory;
-use crate::wrappers::user_object::UserEventObject;
 
-pub struct MemoryInitializeHandler<'a> {
+pub struct SetMonitorHandler<'a> {
     _device: &'a DEVICE_OBJECT,
     _extension: &'a DeviceExtension,
     _irp: &'a mut IRP,
@@ -19,8 +13,8 @@ pub struct MemoryInitializeHandler<'a> {
     _input_length: usize,
 }
 
-impl<'a> IoctlHandler<'a> for MemoryInitializeHandler<'a> {
-    const CODE: u32 = IOCTL_MEMORY_INITIALIZE;
+impl<'a> IoctlHandler<'a> for SetMonitorHandler<'a> {
+    const CODE: u32 = IOCTL_SET_MONITOR;
 
     fn new(
         device: &'a DEVICE_OBJECT,
@@ -39,31 +33,20 @@ impl<'a> IoctlHandler<'a> for MemoryInitializeHandler<'a> {
     }
 
     fn handle(&mut self) -> Result<(), RuntimeError> {
-        if self._input_length != size_of::<MemoryInitialize>() {
+        if self._input_length != size_of::<SetMonitor>() {
             return Err(RuntimeError::Failure(STATUS_INVALID_PARAMETER));
         }
 
         let input = match unsafe {
-            let ptr = self._irp.AssociatedIrp.SystemBuffer as *const MemoryInitialize;
+            let ptr = self._irp.AssociatedIrp.SystemBuffer as *const SetMonitor;
             ptr.as_ref()
         } {
             Some(input) => input,
             None => return Err(RuntimeError::Failure(STATUS_INVALID_PARAMETER)),
         };
 
-        let shared_memory = Box::into_raw(Box::new(SharedMemory {
-            queue: UserChannelMap::from_userspace(input.mapping)?,
-            event: UserEventObject::from_userspace(input.event)?,
-        }));
-
-        let old = self
-            ._extension
-            .shared_memory
-            .swap(shared_memory, Ordering::SeqCst);
-
-        if !old.is_null() {
-            drop(unsafe { Box::from_raw(old) });
-        }
+        let mut threshold = self._extension.thresholds.acquire();
+        threshold.insert(input.name, input.threshold);
 
         Ok(())
     }

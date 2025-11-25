@@ -1,14 +1,16 @@
 use std::collections::VecDeque;
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::{CStr, c_char, c_int, c_void};
 use std::fs::OpenOptions;
 use std::os::windows::io::IntoRawHandle;
 use std::sync::Mutex;
 use std::{io, ptr};
 
 use ffi::win32::event::WindowsEvent;
-use ffi::win32::message::{IOCTL_CLEAR_MONITOR, IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
+use ffi::win32::message::{
+    IOCTL_CLEAR_MONITOR, IOCTL_MEMORY_INITIALIZE, IOCTL_SET_MONITOR, MemoryInitialize, SetMonitor,
+};
 use ffi::win32::mpsc::{DEFAULT_CHANNEL_SIZE, DefaultChannel};
-use ffi::{Event, Threshold};
+use ffi::{Event, StaticCommandName, Threshold};
 use log::{LevelFilter, error};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
@@ -183,7 +185,40 @@ pub unsafe extern "C" fn set_monitor(
     name: *const c_char,
     threshold: *const Threshold,
 ) -> c_int {
-    1
+    let tracer = tracer as *const _KernelTracer;
+    if name.is_null() {
+        return 1;
+    }
+
+    if let Some(tracer) = unsafe { tracer.as_ref() }
+        && let Ok(name) = unsafe { CStr::from_ptr(name) }.to_str()
+        && let Some(threshold) = unsafe { threshold.as_ref() }
+    {
+        let message = SetMonitor {
+            name: StaticCommandName::from(name),
+            threshold: *threshold,
+        };
+
+        if let Err(e) = unsafe {
+            DeviceIoControl(
+                tracer.device,
+                IOCTL_SET_MONITOR,
+                Some(&message as *const _ as *const c_void),
+                size_of::<SetMonitor>() as _,
+                None,
+                0,
+                None,
+                None,
+            )
+        } {
+            error!("Failed to set monitor for {name:?}: {e}");
+            1
+        } else {
+            0
+        }
+    } else {
+        1
+    }
 }
 
 /// # Safety
@@ -192,19 +227,26 @@ pub unsafe extern "C" fn set_monitor(
 pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_int {
     let tracer = tracer as *const _KernelTracer;
     match unsafe { tracer.as_ref() } {
-        Some(tracer) => unsafe {
-            DeviceIoControl(
-                tracer.device,
-                IOCTL_CLEAR_MONITOR,
-                None,
-                0,
-                None,
-                0,
-                None,
-                None,
-            )
+        Some(tracer) => {
+            if let Err(e) = unsafe {
+                DeviceIoControl(
+                    tracer.device,
+                    IOCTL_CLEAR_MONITOR,
+                    None,
+                    0,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+            } {
+                error!("Failed to clear monitor: {e}");
+                1
+            } else {
+                0
+            }
         }
-        .is_err() as c_int,
+
         None => 1,
     }
 }

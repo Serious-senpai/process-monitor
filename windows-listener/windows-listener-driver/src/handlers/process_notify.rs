@@ -1,7 +1,7 @@
 use alloc::string::ToString;
 use core::ffi::{CStr, c_void};
+use core::ptr;
 use core::sync::atomic::Ordering;
-use core::{ptr, slice};
 
 use ffi::NewProcess;
 use ffi::win32::event::{WindowsEvent, WindowsEventData};
@@ -61,8 +61,7 @@ pub unsafe extern "C" fn process_notify(_: HANDLE, process_id: HANDLE, create: B
         }
 
         if let Ok(name) =
-            unsafe { CStr::from_ptr(PsGetProcessImageFileName(*process.ptr()) as *const _) }
-                .to_str()
+            unsafe { CStr::from_ptr(PsGetProcessImageFileName(*process.ptr())) }.to_str()
         {
             let event = WindowsEvent {
                 pid: process_id as _,
