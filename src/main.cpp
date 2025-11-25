@@ -10,6 +10,123 @@
 #include "io.hpp"
 #include "listener.hpp"
 
+#include <psapi.h>
+
+class ResourceUsage
+{
+public:
+    uint64_t cpu;
+    uint64_t memory;
+    uint64_t disk;
+
+    ResourceUsage(uint64_t cpu, uint64_t memory, uint64_t disk)
+        : cpu(cpu), memory(memory), disk(disk) {}
+};
+
+class ResourceCheckpoint
+{
+public:
+    uint64_t cpu;
+    uint64_t memory;
+    uint64_t disk;
+    uint64_t total;
+
+    ResourceCheckpoint(uint64_t cpu, uint64_t memory, uint64_t disk, uint64_t total)
+        : cpu(cpu), memory(memory), disk(disk), total(total) {}
+
+    ResourceUsage delta(const ResourceCheckpoint &old) const
+    {
+        auto diff = total - old.total;
+        if (diff == 0)
+        {
+            return ResourceUsage(0, 0, 0);
+        }
+
+        return ResourceUsage(
+            (cpu - old.cpu) * 10000 / diff, // cap at N * 100.00%, where N is number of CPU cores
+            memory,
+            (disk - old.disk) * 10000 / diff);
+    }
+};
+
+class Process
+{
+#ifdef __linux__
+#elif defined(_WIN32)
+private:
+    HANDLE _handle;
+
+public:
+    Process(HANDLE handle) : _handle(handle) {}
+
+#endif
+
+private:
+    std::unique_ptr<ResourceCheckpoint> _last;
+
+public:
+    ResourceUsage usage();
+
+    static io::Result<Process> open(uint32_t pid);
+};
+
+#ifdef __linux__
+#elif defined(_WIN32)
+ResourceUsage Process::usage()
+{
+    FILETIME creation_time, exit_time, kernel_time, user_time;
+    if (!GetProcessTimes(_handle, &creation_time, &exit_time, &kernel_time, &user_time))
+    {
+        return ResourceUsage(0, 0, 0);
+    }
+
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (!GetProcessMemoryInfo(_handle, &pmc, sizeof(pmc)))
+    {
+        return ResourceUsage(0, 0, 0);
+    }
+
+    FILETIME total_time;
+    GetSystemTimeAsFileTime(&total_time);
+
+    ULARGE_INTEGER ktime;
+    ktime.LowPart = kernel_time.dwLowDateTime;
+    ktime.HighPart = kernel_time.dwHighDateTime;
+
+    ULARGE_INTEGER utime;
+    utime.LowPart = user_time.dwLowDateTime;
+    utime.HighPart = user_time.dwHighDateTime;
+
+    auto memory_usage = pmc.PagefileUsage;
+
+    ULARGE_INTEGER ttime;
+    ttime.LowPart = total_time.dwLowDateTime;
+    ttime.HighPart = total_time.dwHighDateTime;
+
+    auto current = std::make_unique<ResourceCheckpoint>(
+        ktime.QuadPart + utime.QuadPart,
+        memory_usage,
+        0, // TODO: Disk usage
+        ttime.QuadPart);
+
+    auto result = (_last == nullptr) ? ResourceUsage(0, memory_usage, 0) : current->delta(*_last);
+    _last = std::move(current);
+    return result;
+}
+
+io::Result<Process> Process::open(uint32_t pid)
+{
+    auto handle = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (handle == NULL)
+    {
+        return io::Result<Process>::err(io::Error::last_os_error());
+    }
+
+    return io::Result<Process>::ok(Process(handle));
+}
+
+#endif
+
 #ifdef __linux__
 class Statistics
 {

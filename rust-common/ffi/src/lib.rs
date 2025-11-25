@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 pub const COMMAND_LENGTH: usize = 16; // aya_ebpf::TASK_COMM_LEN
 
 #[cfg(not(feature = "linux-kernel"))]
-pub const COMMAND_LENGTH: usize = 256;
+pub const COMMAND_LENGTH: usize = 16; // `PsGetProcessImageFileName` returns 15 characters + null terminator
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
