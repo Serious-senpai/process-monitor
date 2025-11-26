@@ -6,8 +6,9 @@ set name=WindowsListenerService
 if not "%~1"=="" set name=%~1
 
 @echo on
-sc create WindowsListenerService binPath= "%root%windows_listener_driver.sys" type=kernel depend= FltMgr
+sc create "%name%" binPath= "%root%windows_listener_driver.sys" type=kernel depend= FltMgr
 
+:: We add these keys for compatibility with older versions.
 reg add "HKLM\SYSTEM\CurrentControlSet\Services\%name%" /v SupportedFeatures /t REG_DWORD /d 3 /f
 reg add "HKLM\SYSTEM\CurrentControlSet\Services\%name%\Instances" /v DefaultInstance /t REG_SZ /d "Windows Listener Instance" /f
 reg add "HKLM\SYSTEM\CurrentControlSet\Services\%name%\Instances\Windows Listener Instance" /v Altitude /t REG_SZ /d "370030" /f
