@@ -81,11 +81,7 @@ unsafe extern "system" fn _minifilter_postop(
             0
         };
 
-        log!(
-            "_minifilter_postop pid={pid:#x} name={:?} size={}",
-            name,
-            size
-        );
+        log!("_minifilter_postop pid={pid:#x} name={name:?} size={size}");
     }
 
     FLT_POSTOP_FINISHED_PROCESSING
