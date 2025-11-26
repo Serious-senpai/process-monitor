@@ -23,7 +23,6 @@ use wdk_sys::{
 use crate::error::RuntimeError;
 use crate::handlers::driver::{driver_entry as do_driver_entry, driver_unload as do_driver_unload};
 use crate::handlers::irp::irp_handler as do_irp_handler;
-use crate::state::DeviceExtension;
 use crate::wrappers::bindings::IoGetCurrentIrpStackLocation;
 use crate::wrappers::strings::UnicodeString;
 
@@ -41,9 +40,7 @@ unsafe extern "C" fn driver_unload(driver: PDRIVER_OBJECT) {
         }
     };
 
-    if let Err(e) = do_driver_unload(driver) {
-        log!("Error when unloading driver: {e}");
-    }
+    do_driver_unload(driver);
 }
 
 /// # Safety
@@ -54,17 +51,6 @@ unsafe extern "C" fn irp_handler(device: PDEVICE_OBJECT, irp: PIRP) -> NTSTATUS 
         Some(d) => d,
         None => {
             log!("irp_handler: PDEVICE_OBJECT is null");
-            return STATUS_INVALID_PARAMETER;
-        }
-    };
-
-    let extension = match unsafe {
-        let ptr = device.DeviceExtension as *mut DeviceExtension;
-        ptr.as_ref()
-    } {
-        Some(ext) => ext,
-        None => {
-            log!("irp_handler: DeviceExtension is null");
             return STATUS_INVALID_PARAMETER;
         }
     };
@@ -87,7 +73,7 @@ unsafe extern "C" fn irp_handler(device: PDEVICE_OBJECT, irp: PIRP) -> NTSTATUS 
 
     log!("Received IRP {}", irpsp.MajorFunction);
 
-    let status = match do_irp_handler(device, extension, irp, irpsp) {
+    let status = match do_irp_handler(device, irp, irpsp) {
         Ok(()) => STATUS_SUCCESS,
         Err(e) => {
             log!("Error when handling IRP: {e}");

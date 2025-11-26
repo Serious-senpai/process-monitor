@@ -12,9 +12,8 @@ use windows::Wdk::Storage::FileSystem::Minifilters::{
 };
 use windows::Win32::Foundation::{NTSTATUS, STATUS_SUCCESS};
 
-use crate::config::DRIVER;
 use crate::log;
-use crate::state::DeviceExtension;
+use crate::state::DRIVER_STATE;
 use crate::wrappers::bindings::PsGetProcessImageFileName;
 
 pub const FILTER_REGISTRATION: FLT_REGISTRATION = FLT_REGISTRATION {
@@ -93,18 +92,10 @@ unsafe extern "system" fn _minifilter_postop(
 }
 
 unsafe extern "system" fn _minifilter_unload(_: u32) -> NTSTATUS {
-    let driver = DRIVER.load(Ordering::SeqCst);
-    if let Some(driver) = unsafe { driver.as_ref() }
-        && let Some(device) = unsafe { driver.DeviceObject.as_ref() }
-        && let Some(filter) = unsafe {
-            let extension = device.DeviceExtension as *const DeviceExtension;
-            extension
-                .as_ref()
-                .map(|e| e.minifilter.swap(ptr::null_mut(), Ordering::SeqCst))
-        }
-    {
+    let filter = DRIVER_STATE.minifilter.swap(0, Ordering::AcqRel);
+    if filter != 0 {
         unsafe {
-            FltUnregisterFilter(PFLT_FILTER(filter as _));
+            FltUnregisterFilter(PFLT_FILTER(filter));
         }
     }
 

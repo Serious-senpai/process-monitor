@@ -10,7 +10,6 @@ use ioctl::DeviceControlHandler;
 use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP, STATUS_INVALID_DEVICE_REQUEST};
 
 use crate::error::RuntimeError;
-use crate::state::DeviceExtension;
 
 /// Trait for handling IRP requests.
 ///
@@ -26,7 +25,6 @@ pub trait IrpHandler<'a> {
     /// (note that [`IrpHandler::handle()`] does not take any arguments).
     fn new(
         device: &'a DEVICE_OBJECT,
-        extension: &'a DeviceExtension,
         irp: &'a mut IRP,
         irpsp: &'a mut IO_STACK_LOCATION,
     ) -> Result<Self, RuntimeError>
@@ -41,13 +39,12 @@ pub trait IrpHandler<'a> {
 }
 
 macro_rules! _irp_handle {
-    ($device:expr, $extension:expr, $irp:expr, $irpsp:expr, $($Handler:tt,)*) => {
+    ($device:expr, $irp:expr, $irpsp:expr, $($Handler:tt,)*) => {
         match $irpsp.MajorFunction.into() {
             $(
                 $Handler::CODE => {
                     let mut handler = $Handler::new(
                         $device,
-                        $extension,
                         $irp,
                         $irpsp,
                     )?;
@@ -61,13 +58,11 @@ macro_rules! _irp_handle {
 
 pub fn irp_handler(
     device: &DEVICE_OBJECT,
-    extension: &DeviceExtension,
     irp: &mut IRP,
     irpsp: &mut IO_STACK_LOCATION,
 ) -> Result<(), RuntimeError> {
     _irp_handle!(
         device,
-        extension,
         irp,
         irpsp,
         CleanupHandler,

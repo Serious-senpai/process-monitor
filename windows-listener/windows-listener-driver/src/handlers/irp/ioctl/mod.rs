@@ -11,7 +11,6 @@ use wdk_sys::{
 
 use crate::error::RuntimeError;
 use crate::handlers::irp::IrpHandler;
-use crate::state::DeviceExtension;
 
 /// Trait for handling IOCTL requests.
 ///
@@ -27,7 +26,6 @@ pub trait IoctlHandler<'a> {
     /// (note that [`IoctlHandler::handle()`] does not take any arguments).
     fn new(
         device: &'a DEVICE_OBJECT,
-        extension: &'a DeviceExtension,
         irp: &'a mut IRP,
         irpsp: &'a mut IO_STACK_LOCATION,
     ) -> Result<Self, RuntimeError>
@@ -44,13 +42,12 @@ pub trait IoctlHandler<'a> {
 }
 
 macro_rules! _ioctl_handle {
-    ($device:expr, $extension:expr, $irp:expr, $irpsp:expr, $($Handler:tt,)*) => {
+    ($device:expr, $irp:expr, $irpsp:expr, $($Handler:tt,)*) => {
         match unsafe { $irpsp.Parameters.DeviceIoControl.IoControlCode } {
             $(
                 $Handler::CODE => {
                     let mut handler = $Handler::new(
                         $device,
-                        $extension,
                         $irp,
                         $irpsp,
                     )?;
@@ -69,7 +66,6 @@ macro_rules! _ioctl_handle {
 
 pub struct DeviceControlHandler<'a> {
     _device: &'a DEVICE_OBJECT,
-    _extension: &'a DeviceExtension,
     _irp: &'a mut IRP,
     _irpsp: &'a mut IO_STACK_LOCATION,
 }
@@ -79,13 +75,11 @@ impl<'a> IrpHandler<'a> for DeviceControlHandler<'a> {
 
     fn new(
         device: &'a DEVICE_OBJECT,
-        extension: &'a DeviceExtension,
         irp: &'a mut IRP,
         irpsp: &'a mut IO_STACK_LOCATION,
     ) -> Result<Self, RuntimeError> {
         Ok(Self {
             _device: device,
-            _extension: extension,
             _irp: irp,
             _irpsp: irpsp,
         })
@@ -94,7 +88,6 @@ impl<'a> IrpHandler<'a> for DeviceControlHandler<'a> {
     fn handle(&mut self) -> Result<(), RuntimeError> {
         _ioctl_handle!(
             self._device,
-            self._extension,
             self._irp,
             self._irpsp,
             ClearMonitorHandler,

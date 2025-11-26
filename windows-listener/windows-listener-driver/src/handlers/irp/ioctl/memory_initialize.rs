@@ -4,16 +4,14 @@ use core::sync::atomic::Ordering;
 use ffi::win32::message::{IOCTL_MEMORY_INITIALIZE, MemoryInitialize};
 use wdk_sys::{DEVICE_OBJECT, IO_STACK_LOCATION, IRP, STATUS_INVALID_PARAMETER};
 
-use crate::DeviceExtension;
 use crate::error::RuntimeError;
 use crate::handlers::irp::ioctl::IoctlHandler;
 use crate::mpsc::UserChannelMap;
-use crate::state::SharedMemory;
+use crate::state::{DRIVER_STATE, SharedMemory};
 use crate::wrappers::user_object::UserEventObject;
 
 pub struct MemoryInitializeHandler<'a> {
     _device: &'a DEVICE_OBJECT,
-    _extension: &'a DeviceExtension,
     _irp: &'a mut IRP,
     _irpsp: &'a mut IO_STACK_LOCATION,
     _input_length: usize,
@@ -24,14 +22,12 @@ impl<'a> IoctlHandler<'a> for MemoryInitializeHandler<'a> {
 
     fn new(
         device: &'a DEVICE_OBJECT,
-        extension: &'a DeviceExtension,
         irp: &'a mut IRP,
         irpsp: &'a mut IO_STACK_LOCATION,
     ) -> Result<Self, RuntimeError> {
         let input_length = unsafe { irpsp.Parameters.DeviceIoControl.InputBufferLength };
         Ok(Self {
             _device: device,
-            _extension: extension,
             _irp: irp,
             _irpsp: irpsp,
             _input_length: input_length.try_into()?,
@@ -56,10 +52,9 @@ impl<'a> IoctlHandler<'a> for MemoryInitializeHandler<'a> {
             event: UserEventObject::from_userspace(input.event)?,
         }));
 
-        let old = self
-            ._extension
+        let old = DRIVER_STATE
             .shared_memory
-            .swap(shared_memory, Ordering::SeqCst);
+            .swap(shared_memory, Ordering::AcqRel);
 
         if !old.is_null() {
             drop(unsafe { Box::from_raw(old) });
