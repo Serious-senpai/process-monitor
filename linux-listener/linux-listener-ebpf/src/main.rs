@@ -9,12 +9,12 @@ use core::intrinsics;
 use core::ops::Deref;
 use core::panic::PanicInfo;
 
-use aya_ebpf::EbpfContext;
 use aya_ebpf::bindings::{BPF_F_NO_PREALLOC, BPF_NOEXIST};
 use aya_ebpf::helpers::bpf_ktime_get_ns;
 use aya_ebpf::macros::{fexit, kretprobe, map};
 use aya_ebpf::maps::{HashMap, LruHashMap, RingBuf};
 use aya_ebpf::programs::{FExitContext, RetProbeContext};
+use aya_ebpf::EbpfContext;
 use aya_log_ebpf::{debug, warn};
 use ffi::linux::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
 use ffi::{
@@ -91,7 +91,7 @@ fn _update_io_usage<T: EbpfContext>(
                         atomic.fetch_add::<{ intrinsics::AtomicOrdering::Release }>(size);
 
                         let dt = timestamp_ms.saturating_sub(*atomic >> 32);
-                        if dt >= 1_000 {
+                        if dt >= 1000 {
                             let old = atomic.swap::<{ intrinsics::AtomicOrdering::Release }>(
                                 timestamp_ms << 32,
                             );
@@ -107,7 +107,7 @@ fn _update_io_usage<T: EbpfContext>(
                                 threshold,
                                 timestamp_ms
                             );
-                            let rate = ((1_000 * accumulated / dt) & 0xFFFFFFFF) as u32;
+                            let rate = ((1000 * accumulated / dt) & 0xFFFFFFFF) as u32;
 
                             if rate >= threshold {
                                 match EVENTS.reserve::<Event>(0) {

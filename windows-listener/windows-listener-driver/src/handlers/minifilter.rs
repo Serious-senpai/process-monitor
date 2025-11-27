@@ -2,7 +2,9 @@ use core::ffi::{CStr, c_void};
 use core::ptr;
 use core::sync::atomic::Ordering;
 
-use wdk_sys::ntddk::PsGetProcessId;
+use ffi::win32::event::{WindowsEvent, WindowsEventData};
+use ffi::{Metric, StaticCommandName, Violation};
+use wdk_sys::ntddk::{KeQueryPerformanceCounter, PsGetProcessId};
 use wdk_sys::{IRP_MJ_READ, IRP_MJ_WRITE, PEPROCESS};
 use windows::Wdk::Storage::FileSystem::Minifilters::{
     FLT_CALLBACK_DATA, FLT_OPERATION_REGISTRATION, FLT_POSTOP_CALLBACK_STATUS,
@@ -12,6 +14,7 @@ use windows::Wdk::Storage::FileSystem::Minifilters::{
 };
 use windows::Win32::Foundation::{NTSTATUS, STATUS_SUCCESS};
 
+use crate::alloc::string::ToString;
 use crate::log;
 use crate::state::DRIVER_STATE;
 use crate::wrappers::bindings::PsGetProcessImageFileName;
@@ -65,23 +68,96 @@ unsafe extern "system" fn _minifilter_postop(
     _: *const c_void,
     _: u32,
 ) -> FLT_POSTOP_CALLBACK_STATUS {
-    let process = unsafe { FltGetRequestorProcess(data) }.0 as PEPROCESS;
-    if let Ok(name) = unsafe { CStr::from_ptr(PsGetProcessImageFileName(process)) }.to_str() {
-        let pid = unsafe { PsGetProcessId(process) } as usize;
+    let thresholds = DRIVER_STATE.thresholds.load(Ordering::Acquire);
+    let shared_memory = DRIVER_STATE.shared_memory.load(Ordering::Acquire);
+    let ticks_per_ms = DRIVER_STATE.ticks_per_ms.load(Ordering::Acquire);
+    let disk_io = DRIVER_STATE.disk_io.load(Ordering::Acquire);
 
-        let size = if let Some(data) = unsafe { data.as_mut() }
-            && let Some(io) = unsafe { data.Iopb.as_ref() }
-        {
-            match io.MajorFunction.into() {
-                IRP_MJ_READ => unsafe { io.Parameters.Read.Length },
-                IRP_MJ_WRITE => unsafe { io.Parameters.Write.Length },
-                _ => 0,
+    if let Some(thresholds) = unsafe { thresholds.as_ref() }
+        && let Some(shared_memory) = unsafe { shared_memory.as_ref() }
+        && ticks_per_ms > 0
+        && let Some(disk_io) = unsafe { disk_io.as_ref() }
+    {
+        let process = unsafe { FltGetRequestorProcess(data) }.0 as PEPROCESS;
+
+        if let Ok(name) = unsafe { CStr::from_ptr(PsGetProcessImageFileName(process)) }.to_str() {
+            let static_name = StaticCommandName::from(name);
+
+            if let Some(threshold) = {
+                let thresholds = thresholds.acquire();
+                thresholds
+                    .get(&static_name)
+                    .map(|t| t.thresholds[Metric::Disk as usize])
+            } {
+                let pid = unsafe { PsGetProcessId(process) } as u32;
+                let timestamp_ms = (unsafe { KeQueryPerformanceCounter(ptr::null_mut()).QuadPart }
+                    / ticks_per_ms) as u64;
+
+                let size = if let Some(data) = unsafe { data.as_mut() }
+                    && let Some(io) = unsafe { data.Iopb.as_ref() }
+                {
+                    match io.MajorFunction.into() {
+                        IRP_MJ_READ => unsafe { io.Parameters.Read.Length },
+                        IRP_MJ_WRITE => unsafe { io.Parameters.Write.Length },
+                        _ => 0,
+                    }
+                } else {
+                    0
+                };
+
+                let mut disk_io = disk_io.acquire();
+                match disk_io.get_mut(&(static_name, pid)) {
+                    Some(packed) => {
+                        *packed += u128::from(size);
+
+                        let dt = timestamp_ms.saturating_sub((*packed >> 64) as u64);
+                        if dt >= 1000 {
+                            let old = *packed;
+                            *packed = u128::from(timestamp_ms) << 64;
+
+                            let accumulated = old & u128::from(u64::MAX);
+                            log!(
+                                "Received disk I/O metric event from PID {pid}: size = {size}, accumulated = {accumulated}, dt = {dt} ms, threshold = {threshold}, timestamp_ms = {timestamp_ms}"
+                            );
+
+                            let rate = 1000 * accumulated / u128::from(dt);
+                            if rate >= u128::from(threshold) {
+                                let event = WindowsEvent {
+                                    pid,
+                                    name: name.to_string(),
+                                    data: WindowsEventData::Violation(Violation {
+                                        metric: Metric::Disk,
+                                        value: rate as u32,
+                                        threshold,
+                                    }),
+                                };
+
+                                match postcard::to_allocvec_cobs(&event) {
+                                    Ok(data) => {
+                                        if let Err(e) = shared_memory.queue.send(&data) {
+                                            log!(
+                                                "Failed to write data to shared memory queue: {e}"
+                                            );
+                                        } else {
+                                            shared_memory.event.set();
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log!("Failed to serialize {event:?}: {e}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        disk_io.put(
+                            (static_name, pid),
+                            u128::from(timestamp_ms) << 64 | u128::from(size),
+                        );
+                    }
+                }
             }
-        } else {
-            0
-        };
-
-        log!("_minifilter_postop pid={pid:#x} name={name:?} size={size}");
+        }
     }
 
     FLT_POSTOP_FINISHED_PROCESSING

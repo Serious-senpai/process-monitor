@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ffi = { workspace = true, features = ["win32-kernel"] }
+lru = { workspace = true, features = ["hashbrown"] }
 ouroboros = { workspace = true }
 postcard = { workspace = true, features = ["alloc"] }
 wdk = { workspace = true, features = ["alloc"] }

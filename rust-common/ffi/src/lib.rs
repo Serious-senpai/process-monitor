@@ -18,6 +18,8 @@ pub const COMMAND_LENGTH: usize = 16; // aya_ebpf::TASK_COMM_LEN
 #[cfg(not(feature = "linux-kernel"))]
 pub const COMMAND_LENGTH: usize = 16; // `PsGetProcessImageFileName` returns 15 characters + null terminator
 
+pub const MAX_PROCESS_COUNT: u32 = 512;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Threshold {
@@ -37,7 +39,7 @@ pub enum Metric {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct StaticCommandName(pub [u8; COMMAND_LENGTH]);
 
 #[cfg(feature = "linux-user")]

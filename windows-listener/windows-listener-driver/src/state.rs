@@ -1,8 +1,9 @@
 use alloc::collections::btree_map::BTreeMap;
 use core::ptr;
-use core::sync::atomic::{AtomicIsize, AtomicPtr};
+use core::sync::atomic::{AtomicI64, AtomicIsize, AtomicPtr};
 
 use ffi::{StaticCommandName, Threshold};
+use lru::LruCache;
 use wdk_sys::DRIVER_OBJECT;
 
 use crate::mpsc::UserChannelMap;
@@ -19,6 +20,11 @@ pub struct DriverState {
     pub shared_memory: AtomicPtr<SharedMemory>,
     pub minifilter: AtomicIsize,
     pub thresholds: AtomicPtr<SpinLock<BTreeMap<StaticCommandName, Threshold>>>,
+    pub ticks_per_ms: AtomicI64,
+
+    /// - **64-bit high:** timestamp of last measurement (in milliseconds)
+    /// - **64-bit low:** accumulated transfered bytes
+    pub disk_io: AtomicPtr<SpinLock<LruCache<(StaticCommandName, u32), u128>>>,
 }
 
 pub static DRIVER_STATE: DriverState = DriverState {
@@ -26,4 +32,6 @@ pub static DRIVER_STATE: DriverState = DriverState {
     shared_memory: AtomicPtr::new(ptr::null_mut()),
     minifilter: AtomicIsize::new(0),
     thresholds: AtomicPtr::new(ptr::null_mut()),
+    ticks_per_ms: AtomicI64::new(0),
+    disk_io: AtomicPtr::new(ptr::null_mut()),
 };

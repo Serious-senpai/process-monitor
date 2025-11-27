@@ -462,7 +462,7 @@ int main(int argc, char **argv)
 
 #elif defined(_WIN32)
 
-int main()
+int main(int argc, char **argv)
 {
     if (initialize_logger(3))
     {
@@ -475,6 +475,20 @@ int main()
     {
         std::cerr << "Failed to create tracer." << std::endl;
         return 1;
+    }
+
+    Threshold threshold = {};
+    threshold.thresholds[static_cast<size_t>(Metric::Disk)] = threshold.thresholds[static_cast<size_t>(Metric::Network)] = 0;
+    for (int i = 1; i < argc; i++)
+    {
+        if (set_monitor(tracer, argv[i], &threshold))
+        {
+            std::cerr << "Failed to set monitor for " << argv[i] << std::endl;
+            free_tracer(tracer);
+            return 1;
+        }
+
+        // names.emplace(argv[i]);
     }
 
     while (true)
