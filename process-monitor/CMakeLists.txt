@@ -6,10 +6,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}" PROCESS_MONITOR_ROOT)
-message(STATUS "Got root of process_monitor: ${PROCESS_MONITOR_ROOT}")
+message(STATUS "Got root of process-monitor: ${PROCESS_MONITOR_ROOT}")
 message(STATUS "CXX flags: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${PROCESS_MONITOR_ROOT}/src/*.cpp")
+
+# Exclude platform-specific sources for the other OS
+if(WIN32)
+    list(FILTER LIB_SOURCES EXCLUDE REGEX "${PROCESS_MONITOR_ROOT}/src/linux/.*")
+elseif(UNIX)
+    list(FILTER LIB_SOURCES EXCLUDE REGEX "${PROCESS_MONITOR_ROOT}/src/win32/.*")
+else()
+    message(FATAL_ERROR "Unsupported platform")
+endif()
 
 message(STATUS "List of source files for library: ${LIB_SOURCES}")
 

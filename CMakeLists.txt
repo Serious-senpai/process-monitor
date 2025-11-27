@@ -17,5 +17,5 @@ target_link_libraries(ProcessMonitorClient PRIVATE ProcessMonitor SystemLibrary)
 enable_testing()
 
 add_subdirectory("${ROOT}/extern/googletest")
-add_subdirectory("${ROOT}/process_monitor")
+add_subdirectory("${ROOT}/process-monitor")
 add_subdirectory("${ROOT}/syslib")

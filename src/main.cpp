@@ -1,526 +1,555 @@
-#include <atomic>
 #include <iostream>
-#include <mutex>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <unordered_set>
 
-#include "fs.hpp"
-#include "io.hpp"
-#include "listener.hpp"
+#include "foo.hpp"
 
-#include <psapi.h>
+// #include <psapi.h>
 
-class ResourceUsage
+int main()
 {
-public:
-    uint64_t cpu;
-    uint64_t memory;
-    uint64_t disk;
-
-    ResourceUsage(uint64_t cpu, uint64_t memory, uint64_t disk)
-        : cpu(cpu), memory(memory), disk(disk) {}
-};
-
-class ResourceCheckpoint
-{
-public:
-    uint64_t cpu;
-    uint64_t memory;
-    uint64_t disk;
-    uint64_t total;
-
-    ResourceCheckpoint(uint64_t cpu, uint64_t memory, uint64_t disk, uint64_t total)
-        : cpu(cpu), memory(memory), disk(disk), total(total) {}
-
-    ResourceUsage delta(const ResourceCheckpoint &old) const
-    {
-        auto diff = total - old.total;
-        if (diff == 0)
-        {
-            return ResourceUsage(0, 0, 0);
-        }
-
-        return ResourceUsage(
-            (cpu - old.cpu) * 10000 / diff, // cap at N * 100.00%, where N is number of CPU cores
-            memory,
-            (disk - old.disk) * 10000 / diff);
-    }
-};
-
-class Process
-{
-#ifdef __linux__
-#elif defined(_WIN32)
-private:
-    HANDLE _handle;
-
-public:
-    Process(HANDLE handle) : _handle(handle) {}
-
-#endif
-
-private:
-    std::unique_ptr<ResourceCheckpoint> _last;
-
-public:
-    ResourceUsage usage();
-
-    static io::Result<Process> open(uint32_t pid);
-};
-
-#ifdef __linux__
-#elif defined(_WIN32)
-ResourceUsage Process::usage()
-{
-    FILETIME creation_time, exit_time, kernel_time, user_time;
-    if (!GetProcessTimes(_handle, &creation_time, &exit_time, &kernel_time, &user_time))
-    {
-        return ResourceUsage(0, 0, 0);
-    }
-
-    PROCESS_MEMORY_COUNTERS pmc;
-    if (!GetProcessMemoryInfo(_handle, &pmc, sizeof(pmc)))
-    {
-        return ResourceUsage(0, 0, 0);
-    }
-
-    FILETIME total_time;
-    GetSystemTimeAsFileTime(&total_time);
-
-    ULARGE_INTEGER ktime;
-    ktime.LowPart = kernel_time.dwLowDateTime;
-    ktime.HighPart = kernel_time.dwHighDateTime;
-
-    ULARGE_INTEGER utime;
-    utime.LowPart = user_time.dwLowDateTime;
-    utime.HighPart = user_time.dwHighDateTime;
-
-    auto memory_usage = pmc.PagefileUsage;
-
-    ULARGE_INTEGER ttime;
-    ttime.LowPart = total_time.dwLowDateTime;
-    ttime.HighPart = total_time.dwHighDateTime;
-
-    auto current = std::make_unique<ResourceCheckpoint>(
-        ktime.QuadPart + utime.QuadPart,
-        memory_usage,
-        0, // TODO: Disk usage
-        ttime.QuadPart);
-
-    auto result = (_last == nullptr) ? ResourceUsage(0, memory_usage, 0) : current->delta(*_last);
-    _last = std::move(current);
-    return result;
-}
-
-io::Result<Process> Process::open(uint32_t pid)
-{
-    auto handle = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, static_cast<DWORD>(pid));
-    if (handle == NULL)
-    {
-        return io::Result<Process>::err(io::Error::last_os_error());
-    }
-
-    return io::Result<Process>::ok(Process(handle));
-}
-
-#endif
-
-#ifdef __linux__
-class Statistics
-{
-private:
-    uint64_t _cpu;
-    uint64_t _rss;
-    uint64_t _disk;
-    uint64_t _total;
-
-    uint64_t _delta_rate(uint64_t stats, uint64_t old_stats, const Statistics &old) const
-    {
-        auto ticks = _total - old._total;
-        if (ticks == 0)
-        {
-            return 0;
-        }
-
-        static uint64_t cpu_cores = sysconf(_SC_NPROCESSORS_ONLN);
-
-        // Multiply by 100 to get percentage, another 100 to retain two decimal places
-        return (stats - old_stats) * 10000 * cpu_cores / ticks;
-    }
-
-public:
-    explicit Statistics(uint64_t cpu, uint64_t rss, uint64_t disk, uint64_t total)
-        : _cpu(cpu), _rss(rss), _disk(disk), _total(total) {}
-
-    uint64_t cpu_usage(const Statistics &old) const
-    {
-        return _delta_rate(_cpu, old._cpu, old);
-    }
-
-    uint64_t memory_usage() const
-    {
-        static uint64_t page_size = sysconf(_SC_PAGESIZE);
-        return _rss * page_size;
-    }
-
-    uint64_t disk_usage(const Statistics &old) const
-    {
-        static uint64_t user_hz = sysconf(_SC_CLK_TCK);
-        return _delta_rate(_disk, old._disk, old) / user_hz;
-    }
-};
-
-std::atomic<bool> stopped = false;
-
-std::mutex pids_mutex;
-std::unordered_map<uint32_t, Statistics> pids;
-
-std::mutex names_mutex;
-std::unordered_set<std::string> names;
-
-bool is_numeric(const std::string &s)
-{
-    return !s.empty() && std::all_of(s.begin(), s.end(), isdigit);
-}
-
-template <bool ACQ_NAMES_MUTEX>
-std::pair<uint64_t, uint64_t> get_cpu_mem_usage(uint32_t pid, std::span<char> buffer)
-{
-    auto file = fs::File::open(std::format("/proc/{}/stat", pid));
-
-    if (file.is_ok())
-    {
-        auto size = file.unwrap().read(buffer);
-        if (size.is_ok())
-        {
-            buffer[size.unwrap()] = '\0';
-
-            auto ptr = buffer.data();
-            while (*ptr != '(' && ptr - buffer.data() + 1 < size.unwrap())
-            {
-                ptr++;
-            }
-
-            std::istringstream stream(ptr + 1); // skip '('
-            std::string comm;
-            stream >> comm;
-            comm.pop_back(); // remove trailing ')'
-
-            {
-                if constexpr (ACQ_NAMES_MUTEX)
-                {
-                    std::lock_guard<std::mutex> lock(names_mutex);
-                }
-
-                if (names.find(comm) == names.end())
-                {
-                    return std::make_pair(0, 0);
-                }
-            }
-
-            // Currently at field 3 (1-indexed), skip until field 14
-            for (int i = 3; i < 14; i++)
-            {
-                stream >> comm;
-            }
-
-            // Read fields 14, 15
-            uint64_t utime, stime;
-            stream >> utime >> stime;
-
-            // Currently at field 16, skip until field 24
-            for (int i = 16; i < 24; i++)
-            {
-                stream >> comm;
-            }
-
-            uint64_t rss;
-            stream >> rss;
-
-            return std::make_pair(utime + stime, rss);
-        }
-    }
-
-    return std::make_pair(0, 0);
-}
-
-uint64_t get_disk_usage(uint32_t pid, std::span<char> buffer)
-{
-    auto file = fs::File::open(std::format("/proc/{}/io", pid));
-
-    if (file.is_ok())
-    {
-        auto size = file.unwrap().read(buffer);
-        if (size.is_ok())
-        {
-            buffer[size.unwrap()] = '\0';
-            std::istringstream stream(buffer.data());
-
-            std::string ignore;
-            for (int i = 0; i < 9; i++)
-            {
-                stream >> ignore;
-            }
-
-            uint64_t read_bytes, write_bytes;
-            stream >> read_bytes >> ignore >> write_bytes;
-
-            return read_bytes + write_bytes;
-        }
-    }
-
+    std::cout << foo(10) << std::endl;
     return 0;
 }
 
-uint64_t get_total_cpu_time(std::span<char> buffer)
-{
-    auto file = fs::File::open("/proc/stat");
+// class ResourceUsage
+// {
+// public:
+//     uint64_t cpu;
+//     uint64_t memory;
+// #ifdef __linux__
+//     uint64_t disk;
+// #endif
 
-    if (file.is_ok())
-    {
-        auto size = file.unwrap().read(buffer);
-        if (size.is_ok())
-        {
-            buffer[size.unwrap()] = '\0';
-            std::istringstream stream(buffer.data());
-            std::string cpu_label;
-            stream >> cpu_label; // skip "cpu" label
+// #ifdef __linux__
+//     ResourceUsage(
+//         uint64_t cpu,
+//         uint64_t memory,
+//         uint64_t disk)
+//         : cpu(cpu),
+//           memory(memory),
+//           disk(disk) {}
 
-            uint64_t user, nice, system, idle, iowait, irq, softirq, steal;
-            stream >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
+// #elif defined(_WIN32)
+//     ResourceUsage(
+//         uint64_t cpu,
+//         uint64_t memory)
+//         : cpu(cpu),
+//           memory(memory) {}
 
-            return user + nice + system + idle + iowait + irq + softirq + steal;
-        }
-    }
+// #endif
+// };
 
-    return 0;
-}
+// class ResourceCheckpoint
+// {
+// public:
+//     uint64_t cpu;
+//     uint64_t memory;
+// #ifdef __linux__
+//     uint64_t disk;
+// #endif
+//     uint64_t total;
 
-void populate_initial_pids()
-{
-    char buffer[512] = {0};
-    std::span<char> span(buffer, sizeof(buffer));
+//     ResourceCheckpoint(
+//         uint64_t cpu,
+//         uint64_t memory,
+// #ifdef __linux__
+//         uint64_t disk,
+// #endif
+//         uint64_t total)
+//         : cpu(cpu),
+//           memory(memory),
+// #ifdef __linux__
+//           disk(disk),
+// #endif
+//           total(total)
+//     {
+//     }
 
-    std::lock_guard<std::mutex> lock(pids_mutex), lock2(names_mutex);
-    auto dir = fs::read_dir("/proc");
+//     ResourceUsage delta(const ResourceCheckpoint &old) const
+//     {
+//         auto diff = total - old.total;
+//         if (diff == 0)
+//         {
+//             return ResourceUsage(0, 0);
+//         }
 
-    auto entry = dir.begin();
-    if (entry.is_err())
-    {
-        std::cerr << "Failed to read /proc directory: " << entry.unwrap_err().message() << std::endl;
-        return;
-    }
+//         return ResourceUsage(
+//             (cpu - old.cpu) * 10000 / diff, // cap at N * 100.00%, where N is number of CPU cores
+//             memory);
+//     }
+// };
 
-    auto direntry = std::move(entry).into_ok();
-    while (true)
-    {
-        auto &path = direntry.path();
-        auto filename = path.filename().string();
+// class Process
+// {
+// #ifdef __linux__
+// #elif defined(_WIN32)
+// private:
+//     HANDLE _handle;
 
-        if (is_numeric(filename))
-        {
-            uint32_t pid = std::stoul(filename);
+// public:
+//     Process(HANDLE handle) : _handle(handle) {}
 
-            auto disk = get_disk_usage(pid, span);
-            auto [cpu, rss] = get_cpu_mem_usage<false>(pid, span);
-            if (cpu > 0 || rss > 0)
-            {
-                pids.emplace(pid, Statistics(cpu, rss, disk, get_total_cpu_time(span)));
-            }
-        }
+// #endif
 
-        auto has_next = direntry.next();
-        if (has_next.is_ok() && !has_next.unwrap())
-        {
-            break;
-        }
+// private:
+//     std::unique_ptr<ResourceCheckpoint> _last;
 
-        if (has_next.is_err())
-        {
-            std::cerr << "Failed to read next /proc entry: " << has_next.unwrap_err().message() << std::endl;
-            break;
-        }
-    }
-}
+// public:
+//     ResourceUsage usage();
 
-void detect_cpu_mem_disk()
-{
-    char buffer[512] = {0};
-    std::span<char> span(buffer, sizeof(buffer));
+//     static io::Result<Process> open(uint32_t pid);
+// };
 
-    populate_initial_pids();
+// #ifdef __linux__
+// #elif defined(_WIN32)
+// ResourceUsage Process::usage()
+// {
+//     FILETIME creation_time, exit_time, kernel_time, user_time;
+//     if (!GetProcessTimes(_handle, &creation_time, &exit_time, &kernel_time, &user_time))
+//     {
+//         return ResourceUsage(0, 0);
+//     }
 
-    while (!stopped.load())
-    {
-        std::lock_guard<std::mutex> lock(pids_mutex);
-        for (auto iter = pids.begin(); iter != pids.end();)
-        {
-            auto disk = get_disk_usage(iter->first, span);
-            auto [cpu, rss] = get_cpu_mem_usage<true>(iter->first, span);
+//     PROCESS_MEMORY_COUNTERS pmc;
+//     if (!GetProcessMemoryInfo(_handle, &pmc, sizeof(pmc)))
+//     {
+//         return ResourceUsage(0, 0);
+//     }
 
-            if (cpu > 0 || rss > 0)
-            {
-                Statistics new_state(cpu, rss, disk, get_total_cpu_time(span));
-                auto cpu_usage = new_state.cpu_usage(iter->second);
-                auto mem_usage = new_state.memory_usage();
-                auto disk_usage = new_state.disk_usage(iter->second);
-                iter->second = new_state;
+//     FILETIME total_time;
+//     GetSystemTimeAsFileTime(&total_time);
 
-                std::cout << "PID " << iter->first << " CPU usage: " << static_cast<double>(cpu_usage) / 100.0
-                          << " %, Memory usage: " << mem_usage
-                          << " bytes, Disk usage: " << static_cast<double>(disk_usage) / 100.0 << " B/s" << std::endl;
-                iter++;
-            }
-            else
-            {
-                std::cout << "PID " << iter->first << " has exited monitoring." << std::endl;
-                iter = pids.erase(iter);
-            }
-        }
+//     ULARGE_INTEGER ktime;
+//     ktime.LowPart = kernel_time.dwLowDateTime;
+//     ktime.HighPart = kernel_time.dwHighDateTime;
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }
-}
+//     ULARGE_INTEGER utime;
+//     utime.LowPart = user_time.dwLowDateTime;
+//     utime.HighPart = user_time.dwHighDateTime;
 
-int main(int argc, char **argv)
-{
-    if (initialize_logger(3))
-    {
-        std::cerr << "Failed to initialize logger." << std::endl;
-        return 1;
-    }
+//     auto memory_usage = pmc.PagefileUsage;
 
-    auto tracer = new_tracer();
-    if (tracer == nullptr)
-    {
-        std::cerr << "Failed to create tracer. Are you root?" << std::endl;
-        return 1;
-    }
+//     ULARGE_INTEGER ttime;
+//     ttime.LowPart = total_time.dwLowDateTime;
+//     ttime.HighPart = total_time.dwHighDateTime;
 
-    Threshold threshold = {};
-    threshold.thresholds[static_cast<size_t>(Metric::Disk)] = threshold.thresholds[static_cast<size_t>(Metric::Network)] = 0;
-    for (int i = 1; i < argc; i++)
-    {
-        if (set_monitor(tracer, argv[i], &threshold))
-        {
-            std::cerr << "Failed to set monitor for " << argv[i] << std::endl;
-            free_tracer(tracer);
-            return 1;
-        }
+//     auto current = std::make_unique<ResourceCheckpoint>(
+//         ktime.QuadPart + utime.QuadPart,
+//         memory_usage,
+//         0, // TODO: Disk usage
+//         ttime.QuadPart);
 
-        names.emplace(argv[i]);
-    }
+//     auto result = (_last == nullptr) ? ResourceUsage(0, memory_usage) : current->delta(*_last);
+//     _last = std::move(current);
+//     return result;
+// }
 
-    char buffer[512] = {0};
-    std::span<char> span(buffer, sizeof(buffer));
+// io::Result<Process> Process::open(uint32_t pid)
+// {
+//     auto handle = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, static_cast<DWORD>(pid));
+//     if (handle == NULL)
+//     {
+//         return io::Result<Process>::err(io::Error::last_os_error());
+//     }
 
-    std::thread cpu_thread(detect_cpu_mem_disk);
-    while (true)
-    {
-        auto event = next_event(tracer, -1);
-        if (event != nullptr)
-        {
-            if (event->variant == EventType::Violation)
-            {
-                std::cout << "Violation Event detected: PID " << event->pid
-                          << ", Name: " << reinterpret_cast<const char *>(event->name)
-                          << ", Metric: " << static_cast<int>(event->data.violation.metric)
-                          << ", Value: " << event->data.violation.value
-                          << ", Threshold: " << event->data.violation.threshold
-                          << std::endl;
-            }
-            else if (event->variant == EventType::NewProcess)
-            {
-                std::cout << "New Process Event detected: PID " << event->pid
-                          << ", Name: " << reinterpret_cast<const char *>(event->name)
-                          << std::endl;
+//     return io::Result<Process>::ok(Process(handle));
+// }
 
-                std::lock_guard<std::mutex> lock(pids_mutex);
+// #endif
 
-                auto disk = get_disk_usage(event->pid, span);
-                auto [cpu, rss] = get_cpu_mem_usage<true>(event->pid, span);
-                if (cpu > 0 || rss > 0)
-                {
-                    pids.emplace(event->pid, Statistics(cpu, rss, disk, get_total_cpu_time(span)));
-                }
-            }
+// #ifdef __linux__
+// class Statistics
+// {
+// private:
+//     uint64_t _cpu;
+//     uint64_t _rss;
+//     uint64_t _disk;
+//     uint64_t _total;
 
-            drop_event(event);
-        }
-        else
-        {
-            std::cout << "No event received." << std::endl;
-        }
-    }
+//     uint64_t _delta_rate(uint64_t stats, uint64_t old_stats, const Statistics &old) const
+//     {
+//         auto ticks = _total - old._total;
+//         if (ticks == 0)
+//         {
+//             return 0;
+//         }
 
-    free_tracer(tracer);
+//         static uint64_t cpu_cores = sysconf(_SC_NPROCESSORS_ONLN);
 
-    return 0;
-}
+//         // Multiply by 100 to get percentage, another 100 to retain two decimal places
+//         return (stats - old_stats) * 10000 * cpu_cores / ticks;
+//     }
 
-#elif defined(_WIN32)
+// public:
+//     explicit Statistics(uint64_t cpu, uint64_t rss, uint64_t disk, uint64_t total)
+//         : _cpu(cpu), _rss(rss), _disk(disk), _total(total) {}
 
-int main(int argc, char **argv)
-{
-    if (initialize_logger(3))
-    {
-        std::cerr << "Failed to initialize logger." << std::endl;
-        return 1;
-    }
+//     uint64_t cpu_usage(const Statistics &old) const
+//     {
+//         return _delta_rate(_cpu, old._cpu, old);
+//     }
 
-    auto tracer = new_tracer();
-    if (tracer == nullptr)
-    {
-        std::cerr << "Failed to create tracer." << std::endl;
-        return 1;
-    }
+//     uint64_t memory_usage() const
+//     {
+//         static uint64_t page_size = sysconf(_SC_PAGESIZE);
+//         return _rss * page_size;
+//     }
 
-    Threshold threshold = {};
-    threshold.thresholds[static_cast<size_t>(Metric::Disk)] = threshold.thresholds[static_cast<size_t>(Metric::Network)] = 0;
-    for (int i = 1; i < argc; i++)
-    {
-        if (set_monitor(tracer, argv[i], &threshold))
-        {
-            std::cerr << "Failed to set monitor for " << argv[i] << std::endl;
-            free_tracer(tracer);
-            return 1;
-        }
+//     uint64_t disk_usage(const Statistics &old) const
+//     {
+//         static uint64_t user_hz = sysconf(_SC_CLK_TCK);
+//         return _delta_rate(_disk, old._disk, old) / user_hz;
+//     }
+// };
 
-        // names.emplace(argv[i]);
-    }
+// std::atomic<bool> stopped = false;
 
-    while (true)
-    {
-        auto event = next_event(tracer, INFINITE);
-        if (event != nullptr)
-        {
-            if (event->variant == EventType::Violation)
-            {
-                std::cout << "Violation Event detected: PID " << event->pid
-                          << ", Name: " << reinterpret_cast<const char *>(event->name)
-                          << ", Metric: " << static_cast<int>(event->data.violation.metric)
-                          << ", Value: " << event->data.violation.value
-                          << ", Threshold: " << event->data.violation.threshold
-                          << std::endl;
-            }
-            else if (event->variant == EventType::NewProcess)
-            {
-                std::cout << "New Process Event detected: PID " << event->pid
-                          << ", Name: " << reinterpret_cast<const char *>(event->name)
-                          << std::endl;
-            }
+// std::mutex pids_mutex;
+// std::unordered_map<uint32_t, Statistics> pids;
 
-            drop_event(event);
-        }
-        else
-        {
-            std::cout << "No event received." << std::endl;
-        }
-    }
+// std::mutex names_mutex;
+// std::unordered_set<std::string> names;
 
-    free_tracer(tracer);
-}
+// bool is_numeric(const std::string &s)
+// {
+//     return !s.empty() && std::all_of(s.begin(), s.end(), isdigit);
+// }
 
-#endif
+// template <bool ACQ_NAMES_MUTEX>
+// std::pair<uint64_t, uint64_t> get_cpu_mem_usage(uint32_t pid, std::span<char> buffer)
+// {
+//     auto file = fs::File::open(std::format("/proc/{}/stat", pid));
+
+//     if (file.is_ok())
+//     {
+//         auto size = file.unwrap().read(buffer);
+//         if (size.is_ok())
+//         {
+//             buffer[size.unwrap()] = '\0';
+
+//             auto ptr = buffer.data();
+//             while (*ptr != '(' && ptr - buffer.data() + 1 < size.unwrap())
+//             {
+//                 ptr++;
+//             }
+
+//             std::istringstream stream(ptr + 1); // skip '('
+//             std::string comm;
+//             stream >> comm;
+//             comm.pop_back(); // remove trailing ')'
+
+//             {
+//                 if constexpr (ACQ_NAMES_MUTEX)
+//                 {
+//                     std::lock_guard<std::mutex> lock(names_mutex);
+//                 }
+
+//                 if (names.find(comm) == names.end())
+//                 {
+//                     return std::make_pair(0, 0);
+//                 }
+//             }
+
+//             // Currently at field 3 (1-indexed), skip until field 14
+//             for (int i = 3; i < 14; i++)
+//             {
+//                 stream >> comm;
+//             }
+
+//             // Read fields 14, 15
+//             uint64_t utime, stime;
+//             stream >> utime >> stime;
+
+//             // Currently at field 16, skip until field 24
+//             for (int i = 16; i < 24; i++)
+//             {
+//                 stream >> comm;
+//             }
+
+//             uint64_t rss;
+//             stream >> rss;
+
+//             return std::make_pair(utime + stime, rss);
+//         }
+//     }
+
+//     return std::make_pair(0, 0);
+// }
+
+// uint64_t get_disk_usage(uint32_t pid, std::span<char> buffer)
+// {
+//     auto file = fs::File::open(std::format("/proc/{}/io", pid));
+
+//     if (file.is_ok())
+//     {
+//         auto size = file.unwrap().read(buffer);
+//         if (size.is_ok())
+//         {
+//             buffer[size.unwrap()] = '\0';
+//             std::istringstream stream(buffer.data());
+
+//             std::string ignore;
+//             for (int i = 0; i < 9; i++)
+//             {
+//                 stream >> ignore;
+//             }
+
+//             uint64_t read_bytes, write_bytes;
+//             stream >> read_bytes >> ignore >> write_bytes;
+
+//             return read_bytes + write_bytes;
+//         }
+//     }
+
+//     return 0;
+// }
+
+// uint64_t get_total_cpu_time(std::span<char> buffer)
+// {
+//     auto file = fs::File::open("/proc/stat");
+
+//     if (file.is_ok())
+//     {
+//         auto size = file.unwrap().read(buffer);
+//         if (size.is_ok())
+//         {
+//             buffer[size.unwrap()] = '\0';
+//             std::istringstream stream(buffer.data());
+//             std::string cpu_label;
+//             stream >> cpu_label; // skip "cpu" label
+
+//             uint64_t user, nice, system, idle, iowait, irq, softirq, steal;
+//             stream >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
+
+//             return user + nice + system + idle + iowait + irq + softirq + steal;
+//         }
+//     }
+
+//     return 0;
+// }
+
+// void populate_initial_pids()
+// {
+//     char buffer[512] = {0};
+//     std::span<char> span(buffer, sizeof(buffer));
+
+//     std::lock_guard<std::mutex> lock(pids_mutex), lock2(names_mutex);
+//     auto dir = fs::read_dir("/proc");
+
+//     auto entry = dir.begin();
+//     if (entry.is_err())
+//     {
+//         std::cerr << "Failed to read /proc directory: " << entry.unwrap_err().message() << std::endl;
+//         return;
+//     }
+
+//     auto direntry = std::move(entry).into_ok();
+//     while (true)
+//     {
+//         auto &path = direntry.path();
+//         auto filename = path.filename().string();
+
+//         if (is_numeric(filename))
+//         {
+//             uint32_t pid = std::stoul(filename);
+
+//             auto disk = get_disk_usage(pid, span);
+//             auto [cpu, rss] = get_cpu_mem_usage<false>(pid, span);
+//             if (cpu > 0 || rss > 0)
+//             {
+//                 pids.emplace(pid, Statistics(cpu, rss, disk, get_total_cpu_time(span)));
+//             }
+//         }
+
+//         auto has_next = direntry.next();
+//         if (has_next.is_ok() && !has_next.unwrap())
+//         {
+//             break;
+//         }
+
+//         if (has_next.is_err())
+//         {
+//             std::cerr << "Failed to read next /proc entry: " << has_next.unwrap_err().message() << std::endl;
+//             break;
+//         }
+//     }
+// }
+
+// void detect_cpu_mem_disk()
+// {
+//     char buffer[512] = {0};
+//     std::span<char> span(buffer, sizeof(buffer));
+
+//     populate_initial_pids();
+
+//     while (!stopped.load())
+//     {
+//         std::lock_guard<std::mutex> lock(pids_mutex);
+//         for (auto iter = pids.begin(); iter != pids.end();)
+//         {
+//             auto disk = get_disk_usage(iter->first, span);
+//             auto [cpu, rss] = get_cpu_mem_usage<true>(iter->first, span);
+
+//             if (cpu > 0 || rss > 0)
+//             {
+//                 Statistics new_state(cpu, rss, disk, get_total_cpu_time(span));
+//                 auto cpu_usage = new_state.cpu_usage(iter->second);
+//                 auto mem_usage = new_state.memory_usage();
+//                 auto disk_usage = new_state.disk_usage(iter->second);
+//                 iter->second = new_state;
+
+//                 std::cout << "PID " << iter->first << " CPU usage: " << static_cast<double>(cpu_usage) / 100.0
+//                           << " %, Memory usage: " << mem_usage
+//                           << " bytes, Disk usage: " << static_cast<double>(disk_usage) / 100.0 << " B/s" << std::endl;
+//                 iter++;
+//             }
+//             else
+//             {
+//                 std::cout << "PID " << iter->first << " has exited monitoring." << std::endl;
+//                 iter = pids.erase(iter);
+//             }
+//         }
+
+//         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+//     }
+// }
+
+// int main(int argc, char **argv)
+// {
+//     if (initialize_logger(3))
+//     {
+//         std::cerr << "Failed to initialize logger." << std::endl;
+//         return 1;
+//     }
+
+//     auto tracer = new_tracer();
+//     if (tracer == nullptr)
+//     {
+//         std::cerr << "Failed to create tracer. Are you root?" << std::endl;
+//         return 1;
+//     }
+
+//     Threshold threshold = {};
+//     threshold.thresholds[static_cast<size_t>(Metric::Disk)] = threshold.thresholds[static_cast<size_t>(Metric::Network)] = 0;
+//     for (int i = 1; i < argc; i++)
+//     {
+//         if (set_monitor(tracer, argv[i], &threshold))
+//         {
+//             std::cerr << "Failed to set monitor for " << argv[i] << std::endl;
+//             free_tracer(tracer);
+//             return 1;
+//         }
+
+//         names.emplace(argv[i]);
+//     }
+
+//     char buffer[512] = {0};
+//     std::span<char> span(buffer, sizeof(buffer));
+
+//     std::thread cpu_thread(detect_cpu_mem_disk);
+//     while (true)
+//     {
+//         auto event = next_event(tracer, -1);
+//         if (event != nullptr)
+//         {
+//             if (event->variant == EventType::Violation)
+//             {
+//                 std::cout << "Violation Event detected: PID " << event->pid
+//                           << ", Name: " << reinterpret_cast<const char *>(event->name)
+//                           << ", Metric: " << static_cast<int>(event->data.violation.metric)
+//                           << ", Value: " << event->data.violation.value
+//                           << ", Threshold: " << event->data.violation.threshold
+//                           << std::endl;
+//             }
+//             else if (event->variant == EventType::NewProcess)
+//             {
+//                 std::cout << "New Process Event detected: PID " << event->pid
+//                           << ", Name: " << reinterpret_cast<const char *>(event->name)
+//                           << std::endl;
+
+//                 std::lock_guard<std::mutex> lock(pids_mutex);
+
+//                 auto disk = get_disk_usage(event->pid, span);
+//                 auto [cpu, rss] = get_cpu_mem_usage<true>(event->pid, span);
+//                 if (cpu > 0 || rss > 0)
+//                 {
+//                     pids.emplace(event->pid, Statistics(cpu, rss, disk, get_total_cpu_time(span)));
+//                 }
+//             }
+
+//             drop_event(event);
+//         }
+//         else
+//         {
+//             std::cout << "No event received." << std::endl;
+//         }
+//     }
+
+//     free_tracer(tracer);
+
+//     return 0;
+// }
+
+// #elif defined(_WIN32)
+
+// int main(int argc, char **argv)
+// {
+//     if (initialize_logger(3))
+//     {
+//         std::cerr << "Failed to initialize logger." << std::endl;
+//         return 1;
+//     }
+
+//     auto tracer = new_tracer();
+//     if (tracer == nullptr)
+//     {
+//         std::cerr << "Failed to create tracer." << std::endl;
+//         return 1;
+//     }
+
+//     Threshold threshold = {};
+//     threshold.thresholds[static_cast<size_t>(Metric::Disk)] = threshold.thresholds[static_cast<size_t>(Metric::Network)] = 0;
+//     for (int i = 1; i < argc; i++)
+//     {
+//         if (set_monitor(tracer, argv[i], &threshold))
+//         {
+//             std::cerr << "Failed to set monitor for " << argv[i] << std::endl;
+//             free_tracer(tracer);
+//             return 1;
+//         }
+
+//         // names.emplace(argv[i]);
+//     }
+
+//     while (true)
+//     {
+//         auto event = next_event(tracer, INFINITE);
+//         if (event != nullptr)
+//         {
+//             if (event->variant == EventType::Violation)
+//             {
+//                 std::cout << "Violation Event detected: PID " << event->pid
+//                           << ", Name: " << reinterpret_cast<const char *>(event->name)
+//                           << ", Metric: " << static_cast<int>(event->data.violation.metric)
+//                           << ", Value: " << event->data.violation.value
+//                           << ", Threshold: " << event->data.violation.threshold
+//                           << std::endl;
+//             }
+//             else if (event->variant == EventType::NewProcess)
+//             {
+//                 std::cout << "New Process Event detected: PID " << event->pid
+//                           << ", Name: " << reinterpret_cast<const char *>(event->name)
+//                           << std::endl;
+//             }
+
+//             drop_event(event);
+//         }
+//         else
+//         {
+//             std::cout << "No event received." << std::endl;
+//         }
+//     }
+
+//     free_tracer(tracer);
+// }
+
+// #endif
