@@ -54,7 +54,6 @@ pub fn driver_entry(
         cleanup: true,
     };
     guard.driver.DriverUnload = Some(driver_unload);
-    guard.driver.DriverExtension;
     for handler in guard.driver.MajorFunction.iter_mut() {
         *handler = Some(irp_handler);
     }

@@ -1,0 +1,62 @@
+;
+; windows-listener-wfp-driver.inf
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = "ActivityMonitor"
+ClassGuid   = {b86dff51-a31e-4bac-b3cf-e8cfe75c9fc2}
+Provider    = %ProviderString%
+CatalogFile = windows-listener-wfp-driver.cat
+PnpLockDown = 1
+
+[SourceDisksFiles]
+windows-listener-wfp-driver.sys = 1,,
+
+[SourceDisksNames]
+1 = %DiskId1%,,,""
+
+[DestinationDirs]
+CopyFiles = 12
+DelFiles  = 12
+
+; ================= Standard install sections =================
+
+[DefaultInstall.NT$ARCH$]
+OptionDesc = %ServiceDesc%
+CopyFiles  = CopyFiles
+
+[DefaultInstall.NT$ARCH$.Services]
+AddService = %ServiceName%, , DownlevelDefaultInstallService
+
+; ================= Standard uninstall sections =================
+
+[DefaultUninstall.NT$ARCH$]
+LegacyUninstall = 1
+DelFiles        = DelFiles
+
+[DefaultUninstall.NT$ARCH$.Services]
+DelService = %ServiceName%, 0x200 ; Ensure service is stopped before deleting
+
+; ================= Support sections =================
+
+[CopyFiles]
+windows-listener-wfp-driver.sys
+
+[DelFiles]
+windows-listener-wfp-driver.sys
+
+[DownlevelDefaultInstallService]
+DisplayName    = %ServiceName%
+Description    = %ServiceDesc%
+ServiceBinary  = %12%\windows-listener-wfp-driver.sys
+ServiceType    = 1                                ; SERVICE_KERNEL_DRIVER
+StartType      = 3                                ; SERVICE_DEMAND_START - good for development, change to 2 to start on boot
+ErrorControl   = 1                                ; SERVICE_ERROR_NORMAL
+
+[Strings]
+ProviderString         = "TODO-Set-Provider"
+ServiceDesc            = "Windows Listener WFP Service"
+ServiceName            = "Windows Listener WFP"
+DriverName             = "Windows Listener WFP"
+DiskId1                = "Windows Listener WFP Installation Disk #1"
