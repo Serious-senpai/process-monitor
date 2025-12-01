@@ -22,7 +22,7 @@
         }                                                   \
     }
 
-#define INSPECT_DWERROR(dword, message, ...) ON_DWERROR(dword, { }, message, ##__VA_ARGS__)
+#define INSPECT_DWERROR(dword, message, ...) ON_DWERROR(dword, {}, message, ##__VA_ARGS__)
 
 #define ON_NTERROR(ntstatus, on_error, message, ...)        \
     {                                                       \
@@ -34,7 +34,7 @@
         }                                                   \
     }
 
-#define INSPECT_NTERROR(ntstatus, message, ...) ON_NTERROR(ntstatus, { }, message, ##__VA_ARGS__)
+#define INSPECT_NTERROR(ntstatus, message, ...) ON_NTERROR(ntstatus, {}, message, ##__VA_ARGS__)
 
 DEFINE_GUID(
     WINDOWS_LISTENER_WFP_SUBLAYER,
@@ -47,51 +47,57 @@ typedef struct _FlowContext
     // Entry in the global linked list
     LIST_ENTRY entry;
 
+    // Whether this context is removed from the global linked list
+    // A context can be removed either by `tcp_stream_flow_delete` or `driver_unload`
+    BOOL is_removed;
+
     // These fields are for `FwpsFlowRemoveContext0`
+
     UINT64 flow_handle;
     UINT16 layer_id;
     UINT32 callout_id;
 
     // Actual context data
+
     UINT64 pid;
 } FlowContext;
 
 typedef struct _RegisteredCallout
 {
     UINT32 fwps_callout_id;
-	GUID fwpm_callout_key;
-	UINT64 fwpm_filter_id;
+    GUID fwpm_callout_key;
+    UINT64 fwpm_filter_id;
 } RegisteredCallout;
 
 HANDLE FILTER_ENGINE = NULL;
-RegisteredCallout ALE_V4 = { 0 }, ALE_V6 = { 0 }, TCP_STREAM_V4 = { 0 }, TCP_STREAM_V6 = { 0 };
+RegisteredCallout ALE_V4, ALE_V6, TCP_STREAM_V4, TCP_STREAM_V6;
 
 LIST_ENTRY FLOW_CONTEXT_HEAD;
 KSPIN_LOCK FLOW_CONTEXT_LOCK;
 
 BOOL UNLOADING = FALSE;
-volatile LONG64 RUNNING_HANDLERS = 0;
+EX_SPIN_LOCK UNLOADING_LOCK;
 
 static NTSTATUS register_callout(
     IN PDEVICE_OBJECT device,
-    IN const FWPS_CALLOUT0* callout,
+    IN const FWPS_CALLOUT0 *callout,
     IN const GUID *fwpm_applicable_layer,
-	IN UINT16 fwps_target_layer_id,
-	IN UINT32 fwps_target_callout_id,
-	IN const FWPM_SUBLAYER0* sublayer,
+    IN UINT16 fwps_target_layer_id,
+    IN UINT32 fwps_target_callout_id,
+    IN const FWPM_SUBLAYER0 *sublayer,
     OUT RegisteredCallout *result)
 {
     if (callout == NULL || sublayer == NULL || result == NULL)
     {
-		LOG("At least 1 parameter is NULL");
-		return STATUS_INVALID_PARAMETER;
+        LOG("At least 1 parameter is NULL");
+        return STATUS_INVALID_PARAMETER;
     }
 
-	HANDLE filter_engine = FILTER_ENGINE;
+    HANDLE filter_engine = FILTER_ENGINE;
     if (filter_engine == NULL)
     {
         LOG("Filter engine has not been initialized yet");
-		return STATUS_UNSUCCESSFUL;
+        return STATUS_UNSUCCESSFUL;
     }
 
     UINT32 fwps_callout_id = 0;
@@ -102,7 +108,7 @@ static NTSTATUS register_callout(
         return status;
     }
 
-    FWPM_CALLOUT0 mcallout = { 0 };
+    FWPM_CALLOUT0 mcallout = {0};
     mcallout.calloutKey = callout->calloutKey;
     mcallout.displayData.name = L"Windows Listener WFP Callout";
     mcallout.displayData.description = L"Monitors network traffic";
@@ -111,11 +117,11 @@ static NTSTATUS register_callout(
     DWORD ustatus = FwpmCalloutAdd0(filter_engine, &mcallout, NULL, NULL);
     if (ustatus != ERROR_SUCCESS && ustatus != ERROR_ALREADY_EXISTS)
     {
-		LOG("Failed to add callout to filter engine: 0x%08X", ustatus);
+        LOG("Failed to add callout to filter engine: 0x%08X", ustatus);
         return STATUS_UNSUCCESSFUL;
     }
 
-    FWPM_FILTER0 filter = { 0 };
+    FWPM_FILTER0 filter = {0};
     filter.displayData.name = L"Windows Listener WFP filter";
     filter.flags = FWPM_FILTER_FLAG_NONE;
     filter.layerKey = *fwpm_applicable_layer;
@@ -132,15 +138,15 @@ static NTSTATUS register_callout(
         return STATUS_UNSUCCESSFUL;
     }
 
-	result->fwps_callout_id = fwps_callout_id;
-	result->fwpm_callout_key = callout->calloutKey;
-	result->fwpm_filter_id = fwpm_filter_id;
-	return STATUS_SUCCESS;
+    result->fwps_callout_id = fwps_callout_id;
+    result->fwpm_callout_key = callout->calloutKey;
+    result->fwpm_filter_id = fwpm_filter_id;
+    return STATUS_SUCCESS;
 }
 
-static BOOL unregister_callout(IN OUT RegisteredCallout* callout)
+static BOOL unregister_callout(IN OUT RegisteredCallout *callout)
 {
-	BOOL success = TRUE;
+    BOOL success = TRUE;
     if (FILTER_ENGINE == NULL)
     {
         LOG("Cannot fully unregister callout because filter engine is uninitialized");
@@ -163,7 +169,7 @@ static BOOL unregister_callout(IN OUT RegisteredCallout* callout)
                 FwpmCalloutDeleteByKey0(FILTER_ENGINE, &callout->fwpm_callout_key),
                 success = FALSE,
                 "Cannot remove callout from filter engine");
-			callout->fwpm_callout_key = WINDOWS_LISTENER_GUID_NULL;
+            callout->fwpm_callout_key = WINDOWS_LISTENER_GUID_NULL;
         }
     }
 
@@ -171,7 +177,7 @@ static BOOL unregister_callout(IN OUT RegisteredCallout* callout)
     {
         ON_NTERROR(
             FwpsCalloutUnregisterById0(callout->fwps_callout_id),
-			success = FALSE,
+            success = FALSE,
             "Cannot unregister callout"); // FIXME: If a flow context is still associated, this will return STATUS_DEVICE_BUSY
         callout->fwps_callout_id = 0;
     }
@@ -190,13 +196,10 @@ static VOID NTAPI ale_classify(
     UNREFERENCED_PARAMETER(layer_data);
     classify_out->actionType = FWP_ACTION_PERMIT;
 
-    if (UNLOADING)
-    {
-        return;
-    }
-    InterlockedIncrement64(&RUNNING_HANDLERS);
+    ExAcquireSpinLockSharedAtDpcLevel(&UNLOADING_LOCK);
 
-    if (in_fixed_values != NULL &&
+    if (!UNLOADING &&
+        in_fixed_values != NULL &&
         in_meta_values != NULL &&
         FWPS_IS_METADATA_FIELD_PRESENT(in_meta_values, FWPS_METADATA_FIELD_PROCESS_ID) &&
         FWPS_IS_METADATA_FIELD_PRESENT(in_meta_values, FWPS_METADATA_FIELD_FLOW_HANDLE) &&
@@ -204,13 +207,14 @@ static VOID NTAPI ale_classify(
     {
         UINT64 pid = in_meta_values->processId;
 
-        FlowContext* ctx = (FlowContext*)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(FlowContext), 'PFWL');
+        FlowContext *ctx = (FlowContext *)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(FlowContext), 'PFWL');
         if (ctx == NULL)
         {
             LOG("Warning: Insufficient memory to allocate flow context");
         }
         else
         {
+            ctx->is_removed = FALSE;
             ctx->flow_handle = in_meta_values->flowHandle;
             ctx->layer_id = (UINT16)(filter->context >> 32);
             ctx->callout_id = (UINT32)(filter->context & 0xFFFFFFFF);
@@ -234,7 +238,9 @@ static VOID NTAPI ale_classify(
         }
     }
 
-    InterlockedDecrement64(&RUNNING_HANDLERS);
+    // This release must stay at the end of the function. This is to guarantee that the last function
+    // execution with `UNLOADING = FALSE` is fully done before `driver_unload` proceeds.
+    ExReleaseSpinLockSharedFromDpcLevel(&UNLOADING_LOCK);
 }
 
 static VOID NTAPI tcp_stream_classify(
@@ -250,20 +256,16 @@ static VOID NTAPI tcp_stream_classify(
     UNREFERENCED_PARAMETER(filter);
     classify_out->actionType = FWP_ACTION_PERMIT;
 
-    if (UNLOADING)
-    {
-        return;
-    }
-    InterlockedIncrement64(&RUNNING_HANDLERS);
+    ExAcquireSpinLockSharedAtDpcLevel(&UNLOADING_LOCK);
 
-    if (flow_context != 0)
+    if (!UNLOADING && flow_context != 0)
     {
-        FlowContext* ctx = (FlowContext*)flow_context;
+        FlowContext *ctx = (FlowContext *)flow_context;
         UINT64 pid = ctx->pid;
         if (pid != 0 && layer_data != NULL)
         {
-            const FWPS_STREAM_CALLOUT_IO_PACKET0* data = (const FWPS_STREAM_CALLOUT_IO_PACKET0*)layer_data;
-            const FWPS_STREAM_DATA0* stream = data->streamData;
+            const FWPS_STREAM_CALLOUT_IO_PACKET0 *data = (const FWPS_STREAM_CALLOUT_IO_PACKET0 *)layer_data;
+            const FWPS_STREAM_DATA0 *stream = data->streamData;
             if (stream->dataLength > 0)
             {
                 LOG("TCP traffic: PID %llu (%Iu bytes)", pid, stream->dataLength);
@@ -271,7 +273,8 @@ static VOID NTAPI tcp_stream_classify(
         }
     }
 
-    InterlockedDecrement64(&RUNNING_HANDLERS);
+    // This release must stay at the end of the function. See the note in `ale_classify`.
+    ExReleaseSpinLockSharedFromDpcLevel(&UNLOADING_LOCK);
 }
 
 static NTSTATUS NTAPI notify(
@@ -292,22 +295,22 @@ static VOID NTAPI tcp_stream_flow_delete(
 {
     UNREFERENCED_PARAMETER(layer_id);
     UNREFERENCED_PARAMETER(callout_id);
-    
-    InterlockedIncrement64(&RUNNING_HANDLERS);
 
     if (flow_context != 0)
     {
-        FlowContext* ctx = (FlowContext*)flow_context;
+        FlowContext *ctx = (FlowContext *)flow_context;
 
-        KeAcquireSpinLockAtDpcLevel(&FLOW_CONTEXT_LOCK);
-        LOG("UNLOADING list entry for PID %llu", ctx->pid);
-        RemoveEntryList(&ctx->entry);
-        KeReleaseSpinLockFromDpcLevel(&FLOW_CONTEXT_LOCK);
+        KIRQL old_irql = KeAcquireSpinLockRaiseToDpc(&FLOW_CONTEXT_LOCK);
+        if (!ctx->is_removed)
+        {
+            ctx->is_removed = TRUE;
+            LOG("Unloading list entry for PID %llu by tcp_stream_flow_delete", ctx->pid);
+            RemoveEntryList(&ctx->entry);
+        }
+        KeReleaseSpinLock(&FLOW_CONTEXT_LOCK, old_irql);
 
         ExFreePool(ctx);
     }
-
-    InterlockedDecrement64(&RUNNING_HANDLERS);
 }
 
 const FWPS_CALLOUT0 ALE_V4_CALLOUT = {
@@ -342,49 +345,57 @@ static VOID driver_unload(PDRIVER_OBJECT driver)
 {
     LOG("driver_unload");
 
+    KIRQL old_irql = ExAcquireSpinLockExclusive(&UNLOADING_LOCK);
     UNLOADING = TRUE;
-    
-    for (int i = 0; i < 50; i++)
+    ExReleaseSpinLockExclusive(&UNLOADING_LOCK, old_irql);
+
+    // At this point, it is guaranteed that no new flow contexts will be created and read.
+    // In other words, both `ale_classify` and `tcp_stream_classify` become no-op functions.
+
+    KeAcquireSpinLock(&FLOW_CONTEXT_LOCK, &old_irql);
+
+    while (!IsListEmpty(&FLOW_CONTEXT_HEAD))
     {
-        do {
-            YieldProcessor();
-        } while (RUNNING_HANDLERS > 0);
-    }
+        PLIST_ENTRY node = FLOW_CONTEXT_HEAD.Flink;
+        FlowContext *ctx = CONTAINING_RECORD(node, FlowContext, entry);
 
-    // At this point, it is extremely likely that no handlers are running.
+        // For a node to be in the linked list, `is_removed` must be FALSE
+        ctx->is_removed = TRUE;
+        RemoveEntryList(&ctx->entry);
 
-    PLIST_ENTRY node = FLOW_CONTEXT_HEAD.Flink;
-    while (node != &FLOW_CONTEXT_HEAD)
-    {
-        FlowContext* ctx = CONTAINING_RECORD(node, FlowContext, entry);
-        // Update `node` first, because the current node will be freed after `FwpsFlowRemoveContext0`
-        node = node->Flink;
+        // Release the spin lock so that `tcp_stream_flow_delete` can acquire it
+        KeReleaseSpinLock(&FLOW_CONTEXT_LOCK, old_irql);
 
-        // Trigger flow_delete, but DO NOT free memory here
+        // Trigger flow_delete, but DO NOT free memory (i.e. `ExFreePool`) here
         FwpsFlowRemoveContext0(ctx->flow_handle, ctx->layer_id, ctx->callout_id);
+
+        KeAcquireSpinLock(&FLOW_CONTEXT_LOCK, &old_irql);
     }
+
+    // Release to restore IRQL, after this point no one will use the lock anyway
+    KeReleaseSpinLock(&FLOW_CONTEXT_LOCK, old_irql);
 
     if (FILTER_ENGINE != NULL)
     {
         if (!unregister_callout(&ALE_V6))
         {
-			LOG("Failed to unregister ALE_V6 callout");
+            LOG("Failed to unregister ALE_V6 callout");
         }
-        
+
         if (!unregister_callout(&ALE_V4))
         {
             LOG("Failed to unregister ALE_V4 callout");
-		}
+        }
 
         if (!unregister_callout(&TCP_STREAM_V6))
         {
             LOG("Failed to unregister TCP_STREAM_V6 callout");
-		}
+        }
 
         if (!unregister_callout(&TCP_STREAM_V4))
         {
             LOG("Failed to unregister TCP_STREAM_V4 callout");
-		}
+        }
 
         INSPECT_DWERROR(
             FwpmSubLayerDeleteByKey0(FILTER_ENGINE, &WINDOWS_LISTENER_WFP_SUBLAYER),
@@ -439,7 +450,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry)
         return STATUS_UNSUCCESSFUL;
     }
 
-    FWPM_SUBLAYER0 sublayer = { 0 };
+    FWPM_SUBLAYER0 sublayer = {0};
     sublayer.subLayerKey = WINDOWS_LISTENER_WFP_SUBLAYER;
     sublayer.displayData.name = L"Windows Listener WFP Sublayer";
     sublayer.displayData.description = L"Sublayer for Windows Listener WFP Callout driver";
@@ -463,9 +474,9 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry)
         &TCP_STREAM_V4);
     if (!NT_SUCCESS(status))
     {
-		LOG("Failed to register TCP_STREAM_V4 callout: 0x%08X", status);
+        LOG("Failed to register TCP_STREAM_V4 callout: 0x%08X", status);
         driver_unload(driver);
-		return status;
+        return status;
     }
 
     status = register_callout(
