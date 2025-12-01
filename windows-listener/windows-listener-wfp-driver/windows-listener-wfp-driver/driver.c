@@ -1,3 +1,5 @@
+// WFP layer identifiers: https://learn.microsoft.com/en-us/windows/win32/fwp/management-filtering-layer-identifiers-
+
 #define NDIS61 1
 
 #include <ntddk.h>
@@ -40,8 +42,19 @@ DEFINE_GUID(
 
 DEFINE_GUID(WINDOWS_LISTENER_GUID_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
-PDRIVER_OBJECT DRIVER = NULL;
-HANDLE FILTER_ENGINE = NULL;
+typedef struct _FlowContext
+{
+    // Entry in the global linked list
+    LIST_ENTRY entry;
+
+    // These fields are for `FwpsFlowRemoveContext0`
+    UINT64 flow_handle;
+    UINT16 layer_id;
+    UINT32 callout_id;
+
+    // Actual context data
+    UINT64 pid;
+} FlowContext;
 
 typedef struct _RegisteredCallout
 {
@@ -50,7 +63,14 @@ typedef struct _RegisteredCallout
 	UINT64 fwpm_filter_id;
 } RegisteredCallout;
 
+HANDLE FILTER_ENGINE = NULL;
 RegisteredCallout ALE_V4 = { 0 }, ALE_V6 = { 0 }, TCP_STREAM_V4 = { 0 }, TCP_STREAM_V6 = { 0 };
+
+LIST_ENTRY FLOW_CONTEXT_HEAD;
+KSPIN_LOCK FLOW_CONTEXT_LOCK;
+
+BOOL UNLOADING = FALSE;
+volatile LONG64 RUNNING_HANDLERS = 0;
 
 static NTSTATUS register_callout(
     IN PDEVICE_OBJECT device,
@@ -70,7 +90,7 @@ static NTSTATUS register_callout(
 	HANDLE filter_engine = FILTER_ENGINE;
     if (filter_engine == NULL)
     {
-        LOG("Filter engine has not been initialized yet.");
+        LOG("Filter engine has not been initialized yet");
 		return STATUS_UNSUCCESSFUL;
     }
 
@@ -121,7 +141,12 @@ static NTSTATUS register_callout(
 static BOOL unregister_callout(IN OUT RegisteredCallout* callout)
 {
 	BOOL success = TRUE;
-    if (FILTER_ENGINE != NULL)
+    if (FILTER_ENGINE == NULL)
+    {
+        LOG("Cannot fully unregister callout because filter engine is uninitialized");
+        success = FALSE;
+    }
+    else
     {
         if (callout->fwpm_filter_id != 0)
         {
@@ -132,7 +157,7 @@ static BOOL unregister_callout(IN OUT RegisteredCallout* callout)
             callout->fwpm_filter_id = 0;
         }
 
-        if (IsEqualGUID(&callout->fwpm_callout_key, &WINDOWS_LISTENER_GUID_NULL))
+        if (!IsEqualGUID(&callout->fwpm_callout_key, &WINDOWS_LISTENER_GUID_NULL))
         {
             ON_DWERROR(
                 FwpmCalloutDeleteByKey0(FILTER_ENGINE, &callout->fwpm_callout_key),
@@ -165,6 +190,12 @@ static VOID NTAPI ale_classify(
     UNREFERENCED_PARAMETER(layer_data);
     classify_out->actionType = FWP_ACTION_PERMIT;
 
+    if (UNLOADING)
+    {
+        return;
+    }
+    InterlockedIncrement64(&RUNNING_HANDLERS);
+
     if (in_fixed_values != NULL &&
         in_meta_values != NULL &&
         FWPS_IS_METADATA_FIELD_PRESENT(in_meta_values, FWPS_METADATA_FIELD_PROCESS_ID) &&
@@ -173,19 +204,37 @@ static VOID NTAPI ale_classify(
     {
         UINT64 pid = in_meta_values->processId;
 
-        // In order to use `FwpsFlowAssociateContext0`, we need to define a `flow_delete` function
-        // below (even a dummy one works), or else this call will return `STATUS_INVALID_PARAMETER`.
-        NTSTATUS status = FwpsFlowAssociateContext0(
-            in_meta_values->flowHandle,
-            (UINT16)(filter->context >> 32),
-            (UINT32)(filter->context & 0xFFFFFFFF),
-            pid // In order to pass more complex data, allocate a struct and free it in `flow_delete`
-        );
-        if (!NT_SUCCESS(status))
+        FlowContext* ctx = (FlowContext*)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(FlowContext), 'PFWL');
+        if (ctx == NULL)
         {
-            LOG("Warning: Failed to associate flow context to layer: 0x%08X", status);
+            LOG("Warning: Insufficient memory to allocate flow context");
+        }
+        else
+        {
+            ctx->flow_handle = in_meta_values->flowHandle;
+            ctx->layer_id = (UINT16)(filter->context >> 32);
+            ctx->callout_id = (UINT32)(filter->context & 0xFFFFFFFF);
+            ctx->pid = pid;
+
+            // In order to use `FwpsFlowAssociateContext0`, we need to define a `flow_delete` function
+            // below (even a dummy one works), or else this call will return `STATUS_INVALID_PARAMETER`.
+            NTSTATUS status = FwpsFlowAssociateContext0(ctx->flow_handle, ctx->layer_id, ctx->callout_id, (UINT64)ctx);
+            if (NT_SUCCESS(status))
+            {
+                KeAcquireSpinLockAtDpcLevel(&FLOW_CONTEXT_LOCK);
+                LOG("Inserting list entry for PID %llu", pid);
+                InsertTailList(&FLOW_CONTEXT_HEAD, &ctx->entry);
+                KeReleaseSpinLockFromDpcLevel(&FLOW_CONTEXT_LOCK);
+            }
+            else
+            {
+                ExFreePool(ctx);
+                LOG("Warning: Failed to associate flow context to layer: 0x%08X", status);
+            }
         }
     }
+
+    InterlockedDecrement64(&RUNNING_HANDLERS);
 }
 
 static VOID NTAPI tcp_stream_classify(
@@ -201,37 +250,64 @@ static VOID NTAPI tcp_stream_classify(
     UNREFERENCED_PARAMETER(filter);
     classify_out->actionType = FWP_ACTION_PERMIT;
 
-    UINT64 pid = flow_context;
-    if (pid != 0 && layer_data != NULL)
+    if (UNLOADING)
     {
-        const FWPS_STREAM_CALLOUT_IO_PACKET0 *data = (const FWPS_STREAM_CALLOUT_IO_PACKET0 *)layer_data;
-        const FWPS_STREAM_DATA0 *stream = data->streamData;
-        if (stream->dataLength > 0)
+        return;
+    }
+    InterlockedIncrement64(&RUNNING_HANDLERS);
+
+    if (flow_context != 0)
+    {
+        FlowContext* ctx = (FlowContext*)flow_context;
+        UINT64 pid = ctx->pid;
+        if (pid != 0 && layer_data != NULL)
         {
-            LOG("TCP traffic: PID %llu (%Iu bytes)", pid, stream->dataLength);
+            const FWPS_STREAM_CALLOUT_IO_PACKET0* data = (const FWPS_STREAM_CALLOUT_IO_PACKET0*)layer_data;
+            const FWPS_STREAM_DATA0* stream = data->streamData;
+            if (stream->dataLength > 0)
+            {
+                LOG("TCP traffic: PID %llu (%Iu bytes)", pid, stream->dataLength);
+            }
         }
     }
+
+    InterlockedDecrement64(&RUNNING_HANDLERS);
 }
 
 static NTSTATUS NTAPI notify(
-    IN FWPS_CALLOUT_NOTIFY_TYPE notifyType,
-    IN const GUID *filterKey,
+    IN FWPS_CALLOUT_NOTIFY_TYPE notify_type,
+    IN const GUID *filter_key,
     IN const FWPS_FILTER0 *filter)
 {
-    UNREFERENCED_PARAMETER(notifyType);
-    UNREFERENCED_PARAMETER(filterKey);
+    UNREFERENCED_PARAMETER(notify_type);
+    UNREFERENCED_PARAMETER(filter_key);
     UNREFERENCED_PARAMETER(filter);
     return STATUS_SUCCESS;
 }
 
-static VOID NTAPI flow_delete(
-    IN UINT16 layerId,
-    IN UINT32 calloutId,
-    IN UINT64 flowContext)
+static VOID NTAPI tcp_stream_flow_delete(
+    IN UINT16 layer_id,
+    IN UINT32 callout_id,
+    IN UINT64 flow_context)
 {
-    UNREFERENCED_PARAMETER(layerId);
-    UNREFERENCED_PARAMETER(calloutId);
-    UNREFERENCED_PARAMETER(flowContext);
+    UNREFERENCED_PARAMETER(layer_id);
+    UNREFERENCED_PARAMETER(callout_id);
+    
+    InterlockedIncrement64(&RUNNING_HANDLERS);
+
+    if (flow_context != 0)
+    {
+        FlowContext* ctx = (FlowContext*)flow_context;
+
+        KeAcquireSpinLockAtDpcLevel(&FLOW_CONTEXT_LOCK);
+        LOG("UNLOADING list entry for PID %llu", ctx->pid);
+        RemoveEntryList(&ctx->entry);
+        KeReleaseSpinLockFromDpcLevel(&FLOW_CONTEXT_LOCK);
+
+        ExFreePool(ctx);
+    }
+
+    InterlockedDecrement64(&RUNNING_HANDLERS);
 }
 
 const FWPS_CALLOUT0 ALE_V4_CALLOUT = {
@@ -239,33 +315,54 @@ const FWPS_CALLOUT0 ALE_V4_CALLOUT = {
     0,
     ale_classify,
     notify,
-    flow_delete};
+    NULL};
 
 const FWPS_CALLOUT0 ALE_V6_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x2f, 0x94}},
     0,
     ale_classify,
     notify,
-    flow_delete };
+    NULL};
 
 const FWPS_CALLOUT0 TCP_STREAM_V4_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x95}},
     0,
     tcp_stream_classify,
     notify,
-    flow_delete};
+    tcp_stream_flow_delete};
 
 const FWPS_CALLOUT0 TCP_STREAM_V6_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x96}},
     0,
     tcp_stream_classify,
     notify,
-    flow_delete };
+    tcp_stream_flow_delete};
 
 static VOID driver_unload(PDRIVER_OBJECT driver)
 {
     LOG("driver_unload");
-    DRIVER = NULL;
+
+    UNLOADING = TRUE;
+    
+    for (int i = 0; i < 50; i++)
+    {
+        do {
+            YieldProcessor();
+        } while (RUNNING_HANDLERS > 0);
+    }
+
+    // At this point, it is extremely likely that no handlers are running.
+
+    PLIST_ENTRY node = FLOW_CONTEXT_HEAD.Flink;
+    while (node != &FLOW_CONTEXT_HEAD)
+    {
+        FlowContext* ctx = CONTAINING_RECORD(node, FlowContext, entry);
+        // Update `node` first, because the current node will be freed after `FwpsFlowRemoveContext0`
+        node = node->Flink;
+
+        // Trigger flow_delete, but DO NOT free memory here
+        FwpsFlowRemoveContext0(ctx->flow_handle, ctx->layer_id, ctx->callout_id);
+    }
 
     if (FILTER_ENGINE != NULL)
     {
@@ -303,6 +400,8 @@ static VOID driver_unload(PDRIVER_OBJECT driver)
     {
         IoDeleteDevice(device);
     }
+
+    UNLOADING = FALSE;
 }
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry)
@@ -312,6 +411,9 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry)
     driver->DriverUnload = driver_unload;
 
     NTSTATUS status = STATUS_SUCCESS;
+
+    InitializeListHead(&FLOW_CONTEXT_HEAD);
+    KeInitializeSpinLock(&FLOW_CONTEXT_LOCK);
 
     PDEVICE_OBJECT device = NULL;
     status = IoCreateDevice(
@@ -411,6 +513,5 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry)
         return status;
     }
 
-    DRIVER = driver;
     return status;
 }
