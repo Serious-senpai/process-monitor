@@ -5,3 +5,4 @@ pub mod phantom;
 pub mod safety;
 pub mod strings;
 pub mod user_object;
+pub mod wfp;

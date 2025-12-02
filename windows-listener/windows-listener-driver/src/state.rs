@@ -9,6 +9,7 @@ use wdk_sys::DRIVER_OBJECT;
 use crate::mpsc::UserChannelMap;
 use crate::wrappers::lock::SpinLock;
 use crate::wrappers::user_object::UserEventObject;
+use crate::wrappers::wfp::WFPTracer;
 
 pub struct SharedMemory {
     pub queue: UserChannelMap,
@@ -19,6 +20,7 @@ pub struct DriverState {
     pub driver: AtomicPtr<DRIVER_OBJECT>,
     pub shared_memory: AtomicPtr<SharedMemory>,
     pub minifilter: AtomicIsize,
+    pub wfp: AtomicPtr<WFPTracer>,
     pub thresholds: AtomicPtr<SpinLock<BTreeMap<StaticCommandName, Threshold>>>,
     pub ticks_per_ms: AtomicI64,
 
@@ -31,6 +33,7 @@ pub static DRIVER_STATE: DriverState = DriverState {
     driver: AtomicPtr::new(ptr::null_mut()),
     shared_memory: AtomicPtr::new(ptr::null_mut()),
     minifilter: AtomicIsize::new(0),
+    wfp: AtomicPtr::new(ptr::null_mut()),
     thresholds: AtomicPtr::new(ptr::null_mut()),
     ticks_per_ms: AtomicI64::new(0),
     disk_io: AtomicPtr::new(ptr::null_mut()),

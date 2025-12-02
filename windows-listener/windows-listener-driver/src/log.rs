@@ -1,9 +1,9 @@
 #[macro_export]
 macro_rules! log {
     () => {
-        wdk::println!("[WindowsListener]");
+        wdk::println!("[Windows Listener]");
     };
     ($($arg:tt)*) => {
-        wdk::println!("[WindowsListener] {}", format_args!($($arg)*));
+        wdk::println!("[Windows Listener] {}", format_args!($($arg)*));
     };
 }

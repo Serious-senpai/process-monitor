@@ -10,7 +10,7 @@ use wdk::nt_success;
 use wdk_sys::ntddk::{IoCreateDevice, IoDeleteDevice, KeQueryPerformanceCounter};
 use wdk_sys::{
     DEVICE_OBJECT, DO_BUFFERED_IO, DO_DEVICE_INITIALIZING, DRIVER_OBJECT, FILE_DEVICE_SECURE_OPEN,
-    FILE_DEVICE_UNKNOWN, IRP, LARGE_INTEGER,
+    FILE_DEVICE_UNKNOWN, IRP, LARGE_INTEGER, STATUS_UNSUCCESSFUL,
 };
 use windows::Wdk::Storage::FileSystem::Minifilters::{
     FltRegisterFilter, FltStartFiltering, FltUnregisterFilter, PFLT_FILTER,
@@ -29,6 +29,7 @@ use crate::wrappers::safety::{
     remove_create_process_notify,
 };
 use crate::wrappers::strings::UnicodeString;
+use crate::wrappers::wfp;
 
 struct _CleanupGuard<'a> {
     pub driver: &'a mut DRIVER_OBJECT,
@@ -108,6 +109,14 @@ pub fn driver_entry(
 
     DRIVER_STATE.minifilter.store(filter.0, Ordering::Release);
 
+    let wfp = unsafe { wfp::new_wfp_tracer(device) };
+    if wfp.is_null() {
+        log!("Failed to create WFP tracer");
+        return Err(RuntimeError::Failure(STATUS_UNSUCCESSFUL));
+    }
+
+    DRIVER_STATE.wfp.store(wfp, Ordering::Release);
+
     if let Some(device) = unsafe { device.as_mut() } {
         device.Flags |= DO_BUFFERED_IO;
         device.Flags &= !DO_DEVICE_INITIALIZING;
@@ -181,8 +190,14 @@ pub fn driver_unload(driver: &mut DRIVER_OBJECT) {
         }
     }
 
-    let filter = DRIVER_STATE.minifilter.swap(0, Ordering::AcqRel);
+    let wfp = DRIVER_STATE.wfp.swap(ptr::null_mut(), Ordering::AcqRel);
+    if !wfp.is_null() {
+        unsafe {
+            wfp::free_wfp_tracer(wfp);
+        }
+    }
 
+    let filter = DRIVER_STATE.minifilter.swap(0, Ordering::AcqRel);
     if filter != 0 {
         unsafe {
             FltUnregisterFilter(PFLT_FILTER(filter));
