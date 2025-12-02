@@ -113,5 +113,5 @@ DiskId1                = "Windows Listener Installation Disk #1"
 
 DefaultInstance        = "Windows Listener Instance"
 InstanceName           = "Windows Listener Instance"
-InstanceAltitude       = "370030"
+InstanceAltitude       = "360000"
 InstanceFlags          = 0x0
