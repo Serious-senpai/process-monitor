@@ -81,8 +81,8 @@ pub unsafe extern "C" fn initialize_logger(level: c_int) -> c_int {
 /// This function is just marked as `unsafe` because it is exposed via `extern "C"`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
-    let channel_size = size_of::<DefaultChannel>();
-    let channel_size_u32 = match u32::try_from(channel_size) {
+    const CHANNEL_SIZE: usize = size_of::<DefaultChannel>();
+    let channel_size_u32 = match u32::try_from(CHANNEL_SIZE) {
         Ok(size) => size,
         Err(e) => {
             error!("DefaultChannel size is too large: {e}");
@@ -108,7 +108,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
     };
 
     // `HANDLE` already has a `Drop` impl that calls `CloseHandle`. I do not really like this implicit behavior though.
-    let base = unsafe { MapViewOfFile(hmap, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, channel_size) };
+    let base = unsafe { MapViewOfFile(hmap, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, CHANNEL_SIZE) };
 
     if base.Value.is_null() {
         error!("MapViewOfFile failed: {}", io::Error::last_os_error());

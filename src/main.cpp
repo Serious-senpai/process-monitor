@@ -1,14 +1,15 @@
 #include <iostream>
 
 #include "foo.hpp"
+#include "listener.hpp"
 
 // #include <psapi.h>
 
-int main()
-{
-    std::cout << foo(10) << std::endl;
-    return 0;
-}
+// int main()
+// {
+//     std::cout << foo(10) << std::endl;
+//     return 0;
+// }
 
 // class ResourceUsage
 // {
@@ -491,65 +492,65 @@ int main()
 
 // #elif defined(_WIN32)
 
-// int main(int argc, char **argv)
-// {
-//     if (initialize_logger(3))
-//     {
-//         std::cerr << "Failed to initialize logger." << std::endl;
-//         return 1;
-//     }
+int main(int argc, char **argv)
+{
+    if (initialize_logger(3))
+    {
+        std::cerr << "Failed to initialize logger." << std::endl;
+        return 1;
+    }
 
-//     auto tracer = new_tracer();
-//     if (tracer == nullptr)
-//     {
-//         std::cerr << "Failed to create tracer." << std::endl;
-//         return 1;
-//     }
+    auto tracer = new_tracer();
+    if (tracer == nullptr)
+    {
+        std::cerr << "Failed to create tracer." << std::endl;
+        return 1;
+    }
 
-//     Threshold threshold = {};
-//     threshold.thresholds[static_cast<size_t>(Metric::Disk)] = threshold.thresholds[static_cast<size_t>(Metric::Network)] = 0;
-//     for (int i = 1; i < argc; i++)
-//     {
-//         if (set_monitor(tracer, argv[i], &threshold))
-//         {
-//             std::cerr << "Failed to set monitor for " << argv[i] << std::endl;
-//             free_tracer(tracer);
-//             return 1;
-//         }
+    Threshold threshold = {};
+    threshold.thresholds[static_cast<size_t>(Metric::Disk)] = threshold.thresholds[static_cast<size_t>(Metric::Network)] = 0;
+    for (int i = 1; i < argc; i++)
+    {
+        if (set_monitor(tracer, argv[i], &threshold))
+        {
+            std::cerr << "Failed to set monitor for " << argv[i] << std::endl;
+            free_tracer(tracer);
+            return 1;
+        }
 
-//         // names.emplace(argv[i]);
-//     }
+        // names.emplace(argv[i]);
+    }
 
-//     while (true)
-//     {
-//         auto event = next_event(tracer, INFINITE);
-//         if (event != nullptr)
-//         {
-//             if (event->variant == EventType::Violation)
-//             {
-//                 std::cout << "Violation Event detected: PID " << event->pid
-//                           << ", Name: " << reinterpret_cast<const char *>(event->name)
-//                           << ", Metric: " << static_cast<int>(event->data.violation.metric)
-//                           << ", Value: " << event->data.violation.value
-//                           << ", Threshold: " << event->data.violation.threshold
-//                           << std::endl;
-//             }
-//             else if (event->variant == EventType::NewProcess)
-//             {
-//                 std::cout << "New Process Event detected: PID " << event->pid
-//                           << ", Name: " << reinterpret_cast<const char *>(event->name)
-//                           << std::endl;
-//             }
+    while (true)
+    {
+        auto event = next_event(tracer, 5000);
+        if (event != nullptr)
+        {
+            if (event->variant == EventType::Violation)
+            {
+                std::cout << "Violation Event detected: PID " << event->pid
+                          << ", Name: " << reinterpret_cast<const char *>(event->name)
+                          << ", Metric: " << static_cast<int>(event->data.violation.metric)
+                          << ", Value: " << event->data.violation.value
+                          << ", Threshold: " << event->data.violation.threshold
+                          << std::endl;
+            }
+            else if (event->variant == EventType::NewProcess)
+            {
+                std::cout << "New Process Event detected: PID " << event->pid
+                          << ", Name: " << reinterpret_cast<const char *>(event->name)
+                          << std::endl;
+            }
 
-//             drop_event(event);
-//         }
-//         else
-//         {
-//             std::cout << "No event received." << std::endl;
-//         }
-//     }
+            drop_event(event);
+        }
+        else
+        {
+            std::cout << "No event received." << std::endl;
+        }
+    }
 
-//     free_tracer(tracer);
-// }
+    free_tracer(tracer);
+}
 
 // #endif
