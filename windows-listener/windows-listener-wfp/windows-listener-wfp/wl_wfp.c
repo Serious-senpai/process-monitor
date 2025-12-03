@@ -225,7 +225,7 @@ static void NTAPI ale_classify(
             goto cleanup;
         }
 
-        FlowContext *ctx = (FlowContext *)ExAllocatePool2(POOL_FLAG_NON_PAGED_EXECUTE, sizeof(FlowContext), POOL_TAG);
+        FlowContext *ctx = (FlowContext *)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(FlowContext), POOL_TAG);
         if (ctx == NULL)
         {
             LOG("Warning: Insufficient memory to allocate flow context");
@@ -433,7 +433,7 @@ void free_wfp_tracer(WFPTracer *tracer)
 WFPTracer* new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(UINT64 pid, SIZE_T size))
 {
     LOG("Initializing new WFP tracer");
-    WFPTracer *tracer = ExAllocatePool2(POOL_FLAG_NON_PAGED_EXECUTE, sizeof(WFPTracer), POOL_TAG);
+    WFPTracer *tracer = ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(WFPTracer), POOL_TAG);
     if (tracer == NULL)
     {
         LOG("Cannot allocate for WFPTracer");
