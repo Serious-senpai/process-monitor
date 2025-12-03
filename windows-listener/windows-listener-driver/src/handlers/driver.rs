@@ -21,6 +21,7 @@ use crate::displayer::ForeignDisplayer;
 use crate::error::RuntimeError;
 use crate::handlers::minifilter::FILTER_REGISTRATION;
 use crate::handlers::process_notify::process_notify;
+use crate::handlers::wfp::wfp_callback;
 use crate::log;
 use crate::state::DRIVER_STATE;
 use crate::wrappers::lock::SpinLock;
@@ -109,7 +110,7 @@ pub fn driver_entry(
 
     DRIVER_STATE.minifilter.store(filter.0, Ordering::Release);
 
-    let wfp = unsafe { wfp::new_wfp_tracer(device) };
+    let wfp = unsafe { wfp::new_wfp_tracer(device, wfp_callback) };
     if wfp.is_null() {
         log!("Failed to create WFP tracer");
         return Err(RuntimeError::Failure(STATUS_UNSUCCESSFUL));

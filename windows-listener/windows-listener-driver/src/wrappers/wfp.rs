@@ -9,5 +9,8 @@ pub type WFPTracerHandle = *mut WFPTracer;
 
 unsafe extern "C" {
     pub unsafe fn free_wfp_tracer(tracer: WFPTracerHandle);
-    pub unsafe fn new_wfp_tracer(device: PDEVICE_OBJECT) -> WFPTracerHandle;
+    pub unsafe fn new_wfp_tracer(
+        device: PDEVICE_OBJECT,
+        callback: unsafe extern "C" fn(pid: u64, size: usize),
+    ) -> WFPTracerHandle;
 }

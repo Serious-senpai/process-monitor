@@ -12,5 +12,7 @@
 
 typedef struct _WFPTracer* WFPTracerHandle;
 
-VOID free_wfp_tracer(WFPTracerHandle tracer);
-WFPTracerHandle new_wfp_tracer(PDEVICE_OBJECT device);
+void free_wfp_tracer(WFPTracerHandle tracer);
+WFPTracerHandle new_wfp_tracer(
+    PDEVICE_OBJECT device,
+    void (*callback)(UINT64 pid, SIZE_T size));

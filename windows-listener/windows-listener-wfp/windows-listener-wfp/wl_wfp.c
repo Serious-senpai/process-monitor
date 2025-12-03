@@ -74,6 +74,8 @@ typedef struct _WFPTracer
 
     BOOL unloading;
     EX_SPIN_LOCK unloading_lock;
+
+    void (*callback)(UINT64 pid, SIZE_T size);
 } WFPTracer;
 
 static NTSTATUS register_callout(
@@ -183,10 +185,10 @@ static BOOL unregister_callout(IN OUT WFPTracer *tracer, IN OUT RegisteredCallou
     return success;
 }
 
-static VOID NTAPI ale_classify(
+static void NTAPI ale_classify(
     IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
     IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
-    IN OUT VOID *layer_data,
+    IN OUT void *layer_data,
     IN const FWPS_FILTER0 *filter,
     IN UINT64 flow_context,
     IN OUT FWPS_CLASSIFY_OUT0 *classify_out)
@@ -261,10 +263,10 @@ cleanup:
     ExReleaseSpinLockSharedFromDpcLevel(&tracer->unloading_lock);
 }
 
-static VOID NTAPI tcp_stream_classify(
+static void NTAPI tcp_stream_classify(
     IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
     IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
-    IN OUT VOID *layer_data,
+    IN OUT void *layer_data,
     IN const FWPS_FILTER0 *filter,
     IN UINT64 flow_context,
     IN OUT FWPS_CLASSIFY_OUT0 *classify_out)
@@ -285,9 +287,9 @@ static VOID NTAPI tcp_stream_classify(
         {
             const FWPS_STREAM_CALLOUT_IO_PACKET0 *data = (const FWPS_STREAM_CALLOUT_IO_PACKET0 *)layer_data;
             const FWPS_STREAM_DATA0 *stream = data->streamData;
-            if (stream->dataLength > 0)
+            if (tracer->callback != NULL)
             {
-                LOG("TCP traffic: PID %llu (%Iu bytes)", pid, stream->dataLength);
+                tracer->callback(pid, stream->dataLength);
             }
         }
     }
@@ -307,7 +309,7 @@ static NTSTATUS NTAPI notify(
     return STATUS_SUCCESS;
 }
 
-static VOID NTAPI tcp_stream_flow_delete(
+static void NTAPI tcp_stream_flow_delete(
     IN UINT16 layer_id,
     IN UINT32 callout_id,
     IN UINT64 flow_context)
@@ -360,7 +362,7 @@ const FWPS_CALLOUT0 TCP_STREAM_V6_CALLOUT = {
     notify,
     tcp_stream_flow_delete};
 
-VOID free_wfp_tracer(WFPTracer *tracer)
+void free_wfp_tracer(WFPTracer *tracer)
 {
     LOG("Freeing WFP tracer");
 
@@ -428,7 +430,7 @@ VOID free_wfp_tracer(WFPTracer *tracer)
     ExFreePool(tracer);
 }
 
-WFPTracer *new_wfp_tracer(PDEVICE_OBJECT device)
+WFPTracer* new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(UINT64 pid, SIZE_T size))
 {
     LOG("Initializing new WFP tracer");
     WFPTracer *tracer = ExAllocatePool2(POOL_FLAG_NON_PAGED_EXECUTE, sizeof(WFPTracer), POOL_TAG);
@@ -441,6 +443,7 @@ WFPTracer *new_wfp_tracer(PDEVICE_OBJECT device)
     RtlZeroMemory(tracer, sizeof(WFPTracer));
     InitializeListHead(&tracer->flow_ctx_head);
     KeInitializeSpinLock(&tracer->flow_ctx_lock);
+    tracer->callback = callback;
 
     DWORD ustatus = FwpmEngineOpen0(NULL, RPC_C_AUTHN_WINNT, NULL, NULL, &tracer->filter_engine);
     if (ustatus != ERROR_SUCCESS)
