@@ -170,7 +170,14 @@ pub fn driver_unload(driver: &mut DRIVER_OBJECT) {
         log!("Failed to remove process notify: {e}");
     });
 
-    let thresholds = DRIVER_STATE.thresholds.load(Ordering::Acquire);
+    let disk_io = DRIVER_STATE.disk_io.swap(ptr::null_mut(), Ordering::AcqRel);
+    if !disk_io.is_null() {
+        drop(unsafe { Box::from_raw(disk_io) });
+    }
+
+    let thresholds = DRIVER_STATE
+        .thresholds
+        .swap(ptr::null_mut(), Ordering::AcqRel);
     if !thresholds.is_null() {
         drop(unsafe { Box::from_raw(thresholds) });
     }

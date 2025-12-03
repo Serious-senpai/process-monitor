@@ -53,7 +53,7 @@ typedef struct _FlowContext
 
     // Actual context data
 
-    struct _WFPTracer* tracer;
+    struct _WFPTracer *tracer;
     UINT64 pid;
 } FlowContext;
 
@@ -62,7 +62,7 @@ typedef struct _RegisteredCallout
     UINT32 fwps_callout_id;
     GUID fwpm_callout_key;
     UINT64 fwpm_filter_id;
-} RegisteredCallout; 
+} RegisteredCallout;
 
 typedef struct _WFPTracer
 {
@@ -78,11 +78,11 @@ typedef struct _WFPTracer
 
 static NTSTATUS register_callout(
     IN PDEVICE_OBJECT device,
-    IN const FWPS_CALLOUT0* callout,
-    IN const GUID* fwpm_applicable_layer,
-    IN const FWPM_SUBLAYER0* sublayer,
-    IN OUT WFPTracer* tracer,
-    OUT RegisteredCallout* result)
+    IN const FWPS_CALLOUT0 *callout,
+    IN const GUID *fwpm_applicable_layer,
+    IN const FWPM_SUBLAYER0 *sublayer,
+    IN OUT WFPTracer *tracer,
+    OUT RegisteredCallout *result)
 {
     if (callout == NULL || sublayer == NULL || result == NULL)
     {
@@ -105,7 +105,7 @@ static NTSTATUS register_callout(
         return status;
     }
 
-    FWPM_CALLOUT0 mcallout = { 0 };
+    FWPM_CALLOUT0 mcallout = {0};
     mcallout.calloutKey = callout->calloutKey;
     mcallout.displayData.name = L"Windows Listener WFP Callout";
     mcallout.displayData.description = L"Monitors network traffic";
@@ -118,7 +118,7 @@ static NTSTATUS register_callout(
         return STATUS_UNSUCCESSFUL;
     }
 
-    FWPM_FILTER0 filter = { 0 };
+    FWPM_FILTER0 filter = {0};
     filter.displayData.name = L"Windows Listener WFP filter";
     filter.flags = FWPM_FILTER_FLAG_NONE;
     filter.layerKey = *fwpm_applicable_layer;
@@ -141,7 +141,7 @@ static NTSTATUS register_callout(
     return STATUS_SUCCESS;
 }
 
-static BOOL unregister_callout(IN OUT WFPTracer* tracer, IN OUT RegisteredCallout* callout)
+static BOOL unregister_callout(IN OUT WFPTracer *tracer, IN OUT RegisteredCallout *callout)
 {
     BOOL success = TRUE;
     HANDLE filter_engine = tracer->filter_engine;
@@ -184,17 +184,17 @@ static BOOL unregister_callout(IN OUT WFPTracer* tracer, IN OUT RegisteredCallou
 }
 
 static VOID NTAPI ale_classify(
-    IN const FWPS_INCOMING_VALUES0* in_fixed_values,
-    IN const FWPS_INCOMING_METADATA_VALUES0* in_meta_values,
-    IN OUT VOID* layer_data,
-    IN const FWPS_FILTER0* filter,
+    IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
+    IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
+    IN OUT VOID *layer_data,
+    IN const FWPS_FILTER0 *filter,
     IN UINT64 flow_context,
-    IN OUT FWPS_CLASSIFY_OUT0* classify_out)
+    IN OUT FWPS_CLASSIFY_OUT0 *classify_out)
 {
     UNREFERENCED_PARAMETER(layer_data);
     classify_out->actionType = FWP_ACTION_PERMIT;
 
-    WFPTracer* tracer = (WFPTracer*)filter->context;
+    WFPTracer *tracer = (WFPTracer *)filter->context;
     ExAcquireSpinLockSharedAtDpcLevel(&tracer->unloading_lock);
 
     if (!tracer->unloading &&
@@ -220,10 +220,10 @@ static VOID NTAPI ale_classify(
         else
         {
             LOG("Warning: ale_classify called on unsupported layer ID %u", in_fixed_values->layerId);
-            return;
+            goto cleanup;
         }
 
-        FlowContext* ctx = (FlowContext*)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(FlowContext), POOL_TAG);
+        FlowContext *ctx = (FlowContext *)ExAllocatePool2(POOL_FLAG_NON_PAGED_EXECUTE, sizeof(FlowContext), POOL_TAG);
         if (ctx == NULL)
         {
             LOG("Warning: Insufficient memory to allocate flow context");
@@ -255,35 +255,36 @@ static VOID NTAPI ale_classify(
         }
     }
 
+cleanup:
     // This release must stay at the end of the function. This is to guarantee that the last function
     // execution with `UNLOADING = FALSE` is fully done before `driver_unload` proceeds.
     ExReleaseSpinLockSharedFromDpcLevel(&tracer->unloading_lock);
 }
 
 static VOID NTAPI tcp_stream_classify(
-    IN const FWPS_INCOMING_VALUES0* in_fixed_values,
-    IN const FWPS_INCOMING_METADATA_VALUES0* in_meta_values,
-    IN OUT VOID* layer_data,
-    IN const FWPS_FILTER0* filter,
+    IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
+    IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
+    IN OUT VOID *layer_data,
+    IN const FWPS_FILTER0 *filter,
     IN UINT64 flow_context,
-    IN OUT FWPS_CLASSIFY_OUT0* classify_out)
+    IN OUT FWPS_CLASSIFY_OUT0 *classify_out)
 {
     UNREFERENCED_PARAMETER(in_fixed_values);
     UNREFERENCED_PARAMETER(in_meta_values);
     UNREFERENCED_PARAMETER(filter);
     classify_out->actionType = FWP_ACTION_PERMIT;
 
-    WFPTracer* tracer = (WFPTracer*)filter->context;
+    WFPTracer *tracer = (WFPTracer *)filter->context;
     ExAcquireSpinLockSharedAtDpcLevel(&tracer->unloading_lock);
 
     if (!tracer->unloading && flow_context != 0)
     {
-        FlowContext* ctx = (FlowContext*)flow_context;
+        FlowContext *ctx = (FlowContext *)flow_context;
         UINT64 pid = ctx->pid;
         if (pid != 0 && layer_data != NULL)
         {
-            const FWPS_STREAM_CALLOUT_IO_PACKET0* data = (const FWPS_STREAM_CALLOUT_IO_PACKET0*)layer_data;
-            const FWPS_STREAM_DATA0* stream = data->streamData;
+            const FWPS_STREAM_CALLOUT_IO_PACKET0 *data = (const FWPS_STREAM_CALLOUT_IO_PACKET0 *)layer_data;
+            const FWPS_STREAM_DATA0 *stream = data->streamData;
             if (stream->dataLength > 0)
             {
                 LOG("TCP traffic: PID %llu (%Iu bytes)", pid, stream->dataLength);
@@ -297,8 +298,8 @@ static VOID NTAPI tcp_stream_classify(
 
 static NTSTATUS NTAPI notify(
     IN FWPS_CALLOUT_NOTIFY_TYPE notify_type,
-    IN const GUID* filter_key,
-    IN const FWPS_FILTER0* filter)
+    IN const GUID *filter_key,
+    IN const FWPS_FILTER0 *filter)
 {
     UNREFERENCED_PARAMETER(notify_type);
     UNREFERENCED_PARAMETER(filter_key);
@@ -316,7 +317,7 @@ static VOID NTAPI tcp_stream_flow_delete(
 
     if (flow_context != 0)
     {
-        FlowContext* ctx = (FlowContext*)flow_context;
+        FlowContext *ctx = (FlowContext *)flow_context;
 
         KIRQL old_irql = KeAcquireSpinLockRaiseToDpc(&ctx->tracer->flow_ctx_lock);
         if (!ctx->is_removed)
@@ -327,7 +328,7 @@ static VOID NTAPI tcp_stream_flow_delete(
         }
 
         KeReleaseSpinLock(&ctx->tracer->flow_ctx_lock, old_irql);
-        ExFreePoolWithTag(ctx, POOL_TAG);
+        ExFreePool(ctx);
     }
 }
 
@@ -336,30 +337,30 @@ const FWPS_CALLOUT0 ALE_V4_CALLOUT = {
     0,
     ale_classify,
     notify,
-    NULL };
+    NULL};
 
 const FWPS_CALLOUT0 ALE_V6_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x2f, 0x94}},
     0,
     ale_classify,
     notify,
-    NULL };
+    NULL};
 
 const FWPS_CALLOUT0 TCP_STREAM_V4_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x95}},
     0,
     tcp_stream_classify,
     notify,
-    tcp_stream_flow_delete };
+    tcp_stream_flow_delete};
 
 const FWPS_CALLOUT0 TCP_STREAM_V6_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x96}},
     0,
     tcp_stream_classify,
     notify,
-    tcp_stream_flow_delete };
+    tcp_stream_flow_delete};
 
-VOID free_wfp_tracer(WFPTracer* tracer)
+VOID free_wfp_tracer(WFPTracer *tracer)
 {
     LOG("Freeing WFP tracer");
 
@@ -375,7 +376,7 @@ VOID free_wfp_tracer(WFPTracer* tracer)
     while (!IsListEmpty(&tracer->flow_ctx_head))
     {
         PLIST_ENTRY node = tracer->flow_ctx_head.Flink;
-        FlowContext* ctx = CONTAINING_RECORD(node, FlowContext, entry);
+        FlowContext *ctx = CONTAINING_RECORD(node, FlowContext, entry);
 
         // For a node to be in the linked list, `is_removed` must be FALSE
         ctx->is_removed = TRUE;
@@ -424,13 +425,13 @@ VOID free_wfp_tracer(WFPTracer* tracer)
         tracer->filter_engine = NULL;
     }
 
-    ExFreePoolWithTag(tracer, POOL_TAG);
+    ExFreePool(tracer);
 }
 
-WFPTracer* new_wfp_tracer(PDEVICE_OBJECT device)
+WFPTracer *new_wfp_tracer(PDEVICE_OBJECT device)
 {
     LOG("Initializing new WFP tracer");
-    WFPTracer* tracer = ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(WFPTracer), POOL_TAG);
+    WFPTracer *tracer = ExAllocatePool2(POOL_FLAG_NON_PAGED_EXECUTE, sizeof(WFPTracer), POOL_TAG);
     if (tracer == NULL)
     {
         LOG("Cannot allocate for WFPTracer");
@@ -449,7 +450,7 @@ WFPTracer* new_wfp_tracer(PDEVICE_OBJECT device)
         return NULL;
     }
 
-    FWPM_SUBLAYER0 sublayer = { 0 };
+    FWPM_SUBLAYER0 sublayer = {0};
     sublayer.subLayerKey = WINDOWS_LISTENER_WFP_SUBLAYER;
     sublayer.displayData.name = L"Windows Listener WFP Sublayer";
     sublayer.displayData.description = L"Sublayer for Windows Listener WFP Callout driver";
