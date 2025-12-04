@@ -79,11 +79,13 @@ namespace protocol
 
     /**
      * @brief Single process configuration entry
+     *
+     * Note: cpu_percent is the raw percentage from config (e.g., 10 means 10%)
      */
     struct ProcessConfigEntry
     {
         char process_name[MAX_PROCESS_NAME_LENGTH];
-        uint32_t cpu_percent;        // CPU threshold in percent
+        uint32_t cpu_percent;        // CPU threshold in percent (from config JSON)
         uint32_t memory_mb;          // Memory threshold in MB
         uint32_t disk_mb_per_sec;    // Disk I/O threshold in MB/s
         uint32_t network_kb_per_sec; // Network I/O threshold in KB/s
@@ -91,14 +93,17 @@ namespace protocol
 
     /**
      * @brief Violation event data sent from CTA to CTB
+     *
+     * Note: For CPU violations, value and threshold are stored as percent * 100
+     * (e.g., 1050 means 10.50%). This allows 2 decimal places precision.
      */
     struct ViolationEventData
     {
         uint32_t pid;
         char process_name[MAX_PROCESS_NAME_LENGTH];
         ResourceType resource_type;
-        uint64_t value;     // Current value
-        uint64_t threshold; // Configured threshold
+        uint64_t value;     // Current value (for CPU: percent * 100)
+        uint64_t threshold; // Configured threshold (for CPU: percent * 100)
         int64_t timestamp;  // Unix timestamp in seconds
     };
 #pragma pack(pop)
@@ -106,6 +111,7 @@ namespace protocol
     /**
      * @brief Format violation event as a log line
      * Format: "YYYY-MM-DD HH:MM:SS, pid, process_name, type, value"
+     * For CPU: value is displayed as percentage with 2 decimal places
      */
     inline std::string format_violation_log(const ViolationEventData &event)
     {
@@ -120,12 +126,25 @@ namespace protocol
         strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &tm_info);
 
         char line[512];
-        snprintf(line, sizeof(line), "%s, %u, %s, %s, %llu",
-                 time_buf,
-                 event.pid,
-                 event.process_name,
-                 resource_type_to_string(event.resource_type),
-                 static_cast<unsigned long long>(event.value));
+        if (event.resource_type == ResourceType::Cpu)
+        {
+            // CPU is stored as percent * 100, display with 2 decimal places
+            snprintf(line, sizeof(line), "%s, %u, %s, %s, %.2f",
+                     time_buf,
+                     event.pid,
+                     event.process_name,
+                     resource_type_to_string(event.resource_type),
+                     static_cast<double>(event.value) / 100.0);
+        }
+        else
+        {
+            snprintf(line, sizeof(line), "%s, %u, %s, %s, %llu",
+                     time_buf,
+                     event.pid,
+                     event.process_name,
+                     resource_type_to_string(event.resource_type),
+                     static_cast<unsigned long long>(event.value));
+        }
         return std::string(line);
     }
 }

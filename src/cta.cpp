@@ -421,14 +421,19 @@ void resource_polling_thread(std::unordered_set<uint32_t> &tracked_pids,
             }
 
             // Check CPU threshold (threshold=0 means disabled, use UINT32_MAX to catch any usage)
+            // CPU values are stored as percent * 100 for 2 decimal places precision
             if (config->cpu_percent > 0 &&
                 usage->cpu_percent > static_cast<double>(config->cpu_percent))
             {
+                // Store as percent * 100 (e.g., 10.50% becomes 1050)
+                uint64_t cpu_value_scaled = static_cast<uint64_t>(usage->cpu_percent * 100.0);
+                uint64_t cpu_threshold_scaled = static_cast<uint64_t>(config->cpu_percent) * 100;
+
                 auto violation = create_violation_event(
                     pid, name,
                     protocol::ResourceType::Cpu,
-                    static_cast<uint64_t>(usage->cpu_percent),
-                    config->cpu_percent);
+                    cpu_value_scaled,
+                    cpu_threshold_scaled);
                 queue_event(violation);
 
                 std::cout << "[CTA] CPU Violation: " << name
