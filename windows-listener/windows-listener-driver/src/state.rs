@@ -27,6 +27,10 @@ pub struct DriverState {
     /// - **64-bit high:** timestamp of last measurement (in milliseconds)
     /// - **64-bit low:** accumulated transfered bytes
     pub disk_io: AtomicPtr<SpinLock<LruCache<(StaticCommandName, u32), u128>>>,
+
+    /// - **64-bit high:** timestamp of last measurement (in milliseconds)
+    /// - **64-bit low:** accumulated transfered bytes
+    pub network_io: AtomicPtr<SpinLock<LruCache<(StaticCommandName, u32), u128>>>,
 }
 
 pub static DRIVER_STATE: DriverState = DriverState {
@@ -37,4 +41,5 @@ pub static DRIVER_STATE: DriverState = DriverState {
     thresholds: AtomicPtr::new(ptr::null_mut()),
     ticks_per_ms: AtomicI64::new(0),
     disk_io: AtomicPtr::new(ptr::null_mut()),
+    network_io: AtomicPtr::new(ptr::null_mut()),
 };

@@ -1,6 +1,12 @@
+use core::ffi::c_void;
+use core::ptr;
+
 use wdk::nt_success;
-use wdk_sys::ntddk::{IoCreateSymbolicLink, IoDeleteSymbolicLink, PsSetCreateProcessNotifyRoutine};
-use wdk_sys::{BOOLEAN, HANDLE, PASSIVE_LEVEL};
+use wdk_sys::ntddk::{
+    IoCreateSymbolicLink, IoDeleteSymbolicLink, ObfDereferenceObject, PsLookupProcessByProcessId,
+    PsSetCreateProcessNotifyRoutine,
+};
+use wdk_sys::{BOOLEAN, HANDLE, PASSIVE_LEVEL, PEPROCESS};
 
 use crate::error::RuntimeError;
 use crate::wrappers::irql::irql_requires;
@@ -103,3 +109,40 @@ pub fn remove_create_process_notify(
 //     irql_requires(APC_LEVEL)?;
 //     _set_create_thread_notify::<true>(handler)
 // }
+
+pub struct ProcessInfo {
+    _process: PEPROCESS,
+}
+
+impl ProcessInfo {
+    fn new() -> Self {
+        Self {
+            _process: ptr::null_mut(),
+        }
+    }
+
+    pub fn as_ptr(&self) -> *const PEPROCESS {
+        &self._process
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut PEPROCESS {
+        &mut self._process
+    }
+}
+
+impl Drop for ProcessInfo {
+    fn drop(&mut self) {
+        unsafe {
+            ObfDereferenceObject(self._process as *mut c_void);
+        }
+    }
+}
+
+pub fn lookup_process_by_id(process_id: HANDLE) -> Option<ProcessInfo> {
+    let mut process = ProcessInfo::new();
+    if !nt_success(unsafe { PsLookupProcessByProcessId(process_id, process.as_mut_ptr()) }) {
+        return None;
+    }
+
+    Some(process)
+}

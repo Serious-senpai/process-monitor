@@ -138,6 +138,12 @@ pub fn driver_entry(
         })))),
         Ordering::Release,
     );
+    DRIVER_STATE.network_io.store(
+        Box::into_raw(Box::new(SpinLock::new(LruCache::new(unsafe {
+            NonZero::new_unchecked(MAX_PROCESS_COUNT as _)
+        })))),
+        Ordering::Release,
+    );
 
     add_create_process_notify(process_notify).inspect_err(|e| {
         log!("Failed to add process notify: {e}");
@@ -174,6 +180,13 @@ pub fn driver_unload(driver: &mut DRIVER_OBJECT) {
     let disk_io = DRIVER_STATE.disk_io.swap(ptr::null_mut(), Ordering::AcqRel);
     if !disk_io.is_null() {
         drop(unsafe { Box::from_raw(disk_io) });
+    }
+
+    let network_io = DRIVER_STATE
+        .network_io
+        .swap(ptr::null_mut(), Ordering::AcqRel);
+    if !network_io.is_null() {
+        drop(unsafe { Box::from_raw(network_io) });
     }
 
     let thresholds = DRIVER_STATE

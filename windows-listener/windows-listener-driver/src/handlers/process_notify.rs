@@ -1,41 +1,15 @@
 use alloc::string::ToString;
-use core::ffi::{CStr, c_void};
-use core::ptr;
+use core::ffi::CStr;
 use core::sync::atomic::Ordering;
 
 use ffi::NewProcess;
 use ffi::win32::event::{WindowsEvent, WindowsEventData};
-use wdk::nt_success;
-use wdk_sys::ntddk::{ObfDereferenceObject, PsLookupProcessByProcessId};
-use wdk_sys::{BOOLEAN, HANDLE, PEPROCESS};
+use wdk_sys::{BOOLEAN, HANDLE};
 
 use crate::log;
 use crate::state::DRIVER_STATE;
 use crate::wrappers::bindings::PsGetProcessImageFileName;
-
-struct _DereferenceGuard {
-    _process: PEPROCESS,
-}
-
-impl _DereferenceGuard {
-    fn new() -> Self {
-        Self {
-            _process: ptr::null_mut(),
-        }
-    }
-
-    fn ptr(&mut self) -> *mut PEPROCESS {
-        &mut self._process
-    }
-}
-
-impl Drop for _DereferenceGuard {
-    fn drop(&mut self) {
-        unsafe {
-            ObfDereferenceObject(self._process as *mut c_void);
-        }
-    }
-}
+use crate::wrappers::safety::lookup_process_by_id;
 
 /// # Safety
 /// Must be called by the OS.
@@ -47,13 +21,13 @@ pub unsafe extern "C" fn process_notify(_: HANDLE, process_id: HANDLE, create: B
 
     let shared_memory = DRIVER_STATE.shared_memory.load(Ordering::Acquire);
     if let Some(shared_memory) = unsafe { shared_memory.as_ref() } {
-        let mut process = _DereferenceGuard::new();
-        if !nt_success(unsafe { PsLookupProcessByProcessId(process_id, process.ptr()) }) {
-            return;
-        }
+        let process = match lookup_process_by_id(process_id) {
+            Some(process) => process,
+            None => return,
+        };
 
         if let Ok(name) =
-            unsafe { CStr::from_ptr(PsGetProcessImageFileName(*process.ptr())) }.to_str()
+            unsafe { CStr::from_ptr(PsGetProcessImageFileName(*process.as_ptr())) }.to_str()
         {
             let event = WindowsEvent {
                 pid: process_id as _,

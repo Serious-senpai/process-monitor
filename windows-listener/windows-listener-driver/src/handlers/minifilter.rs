@@ -1,3 +1,4 @@
+use alloc::string::ToString;
 use core::ffi::{CStr, c_void};
 use core::ptr;
 use core::sync::atomic::Ordering;
@@ -14,7 +15,6 @@ use windows::Wdk::Storage::FileSystem::Minifilters::{
 };
 use windows::Win32::Foundation::{NTSTATUS, STATUS_SUCCESS};
 
-use crate::alloc::string::ToString;
 use crate::log;
 use crate::state::DRIVER_STATE;
 use crate::wrappers::bindings::PsGetProcessImageFileName;
