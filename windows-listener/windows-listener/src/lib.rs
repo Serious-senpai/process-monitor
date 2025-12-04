@@ -49,6 +49,13 @@ pub struct KernelTracerHandle {
 
 const DEVICE_NAME: &str = r"\\.\WinLisDev";
 
+/// Initialize the logger with the specified minimum verbose log level.
+/// Valid values for `level` are: 0 (Off), 1 (Error), 2 (Warn), 3 (Info), 4 (Debug), 5 (Trace).
+///
+/// # Returns
+/// - 0 on success
+/// - 1 on failure
+///
 /// # Safety
 /// This function is just marked as `unsafe` because it is exposed via `extern "C"`.
 #[unsafe(no_mangle)]
@@ -77,6 +84,11 @@ pub unsafe extern "C" fn initialize_logger(level: c_int) -> c_int {
     0
 }
 
+/// Create a new kernel tracer instance.
+///
+/// # Returns
+/// A pointer to the created `KernelTracerHandle` instance, or null on failure.
+///
 /// # Safety
 /// This function is just marked as `unsafe` because it is exposed via `extern "C"`.
 #[unsafe(no_mangle)]
@@ -164,6 +176,8 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
     }
 }
 
+/// Free the kernel tracer instance.
+///
 /// # Safety
 /// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
 #[unsafe(no_mangle)]
@@ -174,6 +188,12 @@ pub unsafe extern "C" fn free_tracer(tracer: *mut KernelTracerHandle) {
     }
 }
 
+/// Add a monitor target to the provided kernel tracer (for example: "curl.exe")
+///
+/// # Returns
+/// - 0 on success
+/// - 1 on failure
+///
 /// # Safety
 /// All of the following conditions must be true:
 /// - `tracer` must be null or a valid pointer obtained from [`new_tracer`].
@@ -221,6 +241,12 @@ pub unsafe extern "C" fn set_monitor(
     }
 }
 
+/// Clear all monitor targets from the provided kernel tracer.
+///
+/// # Returns
+/// - 0 on success
+/// - 1 on failure
+///
 /// # Safety
 /// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
 #[unsafe(no_mangle)]
@@ -251,6 +277,16 @@ pub unsafe extern "C" fn clear_monitor(tracer: *const KernelTracerHandle) -> c_i
     }
 }
 
+/// Return the next event from the kernel tracer.
+/// In Windows, the following types of event may be returned:
+/// - Process creation event
+/// - Violation of disk I/O usage threshold
+/// - Violation of network I/O usage threshold
+///
+/// # Returns
+/// A pointer to the obtained `Event` instance, or null on timeout or failure. Note
+/// that the returned pointer must be freed via [`drop_event`].
+///
 /// # Safety
 /// The provided pointer must be null or a valid pointer obtained from [`new_tracer`].
 #[unsafe(no_mangle)]
@@ -311,6 +347,8 @@ pub unsafe extern "C" fn next_event(
     }
 }
 
+/// Free the event obtained from [`next_event`].
+///
 /// # Safety
 /// The provided pointer must be null or a valid pointer obtained from [`next_event`].
 #[unsafe(no_mangle)]
