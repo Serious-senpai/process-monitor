@@ -1,0 +1,30 @@
+[
+    {
+        "process": "chrome.exe",
+        "cpu": 10,
+        "memory": 200,
+        "disk": 1,
+        "network": 500
+    },
+    {
+        "process": "devenv.exe",
+        "cpu": 50,
+        "memory": 100,
+        "disk": 10,
+        "network": 100
+    },
+    {
+        "process": "notepad.exe",
+        "cpu": 5,
+        "memory": 50,
+        "disk": 1,
+        "network": 10
+    },
+    {
+        "process": "Code.exe",
+        "cpu": 30,
+        "memory": 500,
+        "disk": 5,
+        "network": 200
+    }
+]

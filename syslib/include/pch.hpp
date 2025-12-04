@@ -10,10 +10,16 @@
 #include <span>
 #include <string>
 #include <variant>
+#include <chrono>
+#include <optional>
 
 #ifdef _WIN32
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+
+// #pragma comment(lib, "Ws2_32.lib")
 
 #elif defined(__linux__)
 
