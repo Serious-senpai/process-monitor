@@ -1,30 +1,30 @@
 [
     {
-        "process": "chrome.exe",
-        "cpu": 10,
-        "memory": 200,
-        "disk": 1,
-        "network": 500
+        "process": "firefox",
+        "cpu": 1,
+        "memory": 1,
+        "disk": 0,
+        "network": 0
     },
     {
-        "process": "devenv.exe",
-        "cpu": 50,
-        "memory": 100,
-        "disk": 10,
-        "network": 100
+        "process": "curl",
+        "cpu": 1,
+        "memory": 1,
+        "disk": 0,
+        "network": 0
     },
     {
         "process": "notepad.exe",
-        "cpu": 5,
-        "memory": 50,
-        "disk": 1,
-        "network": 10
+        "cpu": 1,
+        "memory": 1,
+        "disk": 0,
+        "network": 0
     },
     {
-        "process": "Code.exe",
-        "cpu": 30,
-        "memory": 500,
-        "disk": 5,
-        "network": 200
+        "process": "dllhost",
+        "cpu": 1,
+        "memory": 1,
+        "disk": 0,
+        "network": 0
     }
 ]

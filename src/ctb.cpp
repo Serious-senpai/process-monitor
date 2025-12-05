@@ -33,6 +33,7 @@
 #include "protocol.hpp"
 #include "json_parser.hpp"
 #include "net.hpp"
+#include "generated/listener.hpp"
 
 using namespace std::chrono_literals;
 

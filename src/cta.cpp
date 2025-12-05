@@ -31,8 +31,9 @@
 #include "config_storage.hpp"
 #include "json_parser.hpp"
 #include "process_monitor.hpp"
-#include "listener.hpp"
 #include "net.hpp"
+#include "thread.hpp"
+#include "generated/listener.hpp"
 
 using namespace std::chrono_literals;
 
@@ -144,7 +145,7 @@ void ctb_communication_thread()
         if (connect_result.is_err())
         {
             g_ctb_connected = false;
-            std::this_thread::sleep_for(1s);
+            thread::sleep(1s);
             continue;
         }
 
@@ -242,10 +243,10 @@ void ctb_communication_thread()
                 break;
             }
 
-            std::this_thread::sleep_for(100ms);
+            thread::sleep(100ms);
         }
 
-        std::this_thread::sleep_for(1s);
+        thread::sleep(1s);
     }
 }
 
@@ -496,7 +497,7 @@ void resource_polling_thread(std::unordered_set<uint32_t> &tracked_pids,
         auto sleep_time = 1s - elapsed;
         if (sleep_time > 0ms)
         {
-            std::this_thread::sleep_for(sleep_time);
+            thread::sleep(sleep_time);
         }
     }
 }
@@ -624,7 +625,7 @@ int main(int argc, char **argv)
     size_t last_config_size = g_config.size();
     while (g_running)
     {
-        std::this_thread::sleep_for(1s);
+        thread::sleep(1s);
 
         // Check if config was updated
         size_t current_config_size;

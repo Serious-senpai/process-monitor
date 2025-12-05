@@ -288,11 +288,10 @@ namespace process_monitor
             usage.pid = current.pid;
             usage.name = current.name;
 
-            // CPU usage: (delta_cpu_time / elapsed_time) * 100 / num_cpus
+            // CPU usage: (delta_cpu_time / elapsed_time) * 100
+            // This matches `top`'s behavior: 100% = one full core
             uint64_t delta_cpu = current.cpu_time_ms - prev.cpu_time_ms;
-            usage.cpu_percent = (static_cast<double>(delta_cpu) / elapsed) * 100.0 / _num_cpus;
-            if (usage.cpu_percent > 100.0)
-                usage.cpu_percent = 100.0;
+            usage.cpu_percent = (static_cast<double>(delta_cpu) / elapsed) * 100.0;
             if (usage.cpu_percent < 0.0)
                 usage.cpu_percent = 0.0;
 

@@ -6,6 +6,7 @@ pub mod linux;
 #[cfg(feature = "win32-kernel")]
 pub mod win32;
 
+#[cfg(feature = "win32-kernel")]
 extern crate alloc;
 
 use core::{fmt, str};

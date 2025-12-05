@@ -52,7 +52,7 @@ namespace
         {
             return io::Result<int>::err(io::Error::last_os_error());
         }
-        return io::Result<int>::ok(value);
+        return io::Result<int>::ok(std::move(value));
     }
 }
 
