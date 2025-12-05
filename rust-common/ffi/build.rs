@@ -6,7 +6,7 @@ fn main() -> anyhow::Result<()> {
     let headers_dir = linux_listener_dir
         .join("..")
         .join("..")
-        .join("process-monitor")
+        .join("src")
         .join("generated");
 
     cbindgen_base::default(&linux_listener_dir)
