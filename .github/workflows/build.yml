@@ -1,0 +1,61 @@
+name: Build
+
+on: [ push, pull_request ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build application
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, linux-latest]
+        include:
+          - os: windows-latest
+            arch: arm64
+            target: aarch64-pc-windows-msvc
+
+          - os: windows-latest
+            arch: amd64
+            target: x86_64-pc-windows-msvc
+
+          - os: linux-latest
+            target: x86_64-unknown-linux-gnu
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.89
+          target: ${{ matrix.target }}
+          cache: false
+          rustflags: ""
+
+      - name: Build Windows dynamic library
+        if: ${{ runner.os == 'Windows' }}
+        working-directory: windows-listener
+        run: cargo wdk build --profile release --target-arch ${{ matrix.arch }}
+
+      - name: Build Linux dynamic library
+        if: ${{ runner.os == 'Linux' }}
+        working-directory: linux-listener
+        run: cargo build --release
+
+      - name: Build user-mode application
+        run: cmake -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ --no-warn-unused-cli -S . -B build -G "MinGW Makefiles"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}-${{ matrix.target }}
+          path: |
+            build/ProcessMonitorClient.exe
+            windows-listener/target/${{ matrix.target }}/release/windows-listener.dll
+            windows-listener/target/${{ matrix.target }}/release/windows_listener_driver_package
+            linux-listener/target/${{ matrix.target }}/release/liblinux_listener.so

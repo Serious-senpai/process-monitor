@@ -2,31 +2,31 @@
 
 #include "wl_wfp.h"
 
-#define LOG(format, ...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "[Windows Listener WFP] " format "\n", ##__VA_ARGS__)
+#define LOG(format, ...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "[Windows Listener WFP] " format "\n" __VA_OPT__(, ) __VA_ARGS__)
 
-#define ON_DWERROR(dword, on_error, message, ...)           \
-    {                                                       \
-        DWORD status = (dword);                             \
-        if (status != ERROR_SUCCESS)                        \
-        {                                                   \
-            LOG(message ": 0x%08X", ##__VA_ARGS__, status); \
-            on_error;                                       \
-        }                                                   \
+#define ON_DWERROR(dword, on_error, message, ...)                       \
+    {                                                                   \
+        DWORD status = (dword);                                         \
+        if (status != ERROR_SUCCESS)                                    \
+        {                                                               \
+            LOG(message ": 0x%08X" __VA_OPT__(, ) __VA_ARGS__, status); \
+            on_error;                                                   \
+        }                                                               \
     }
 
-#define INSPECT_DWERROR(dword, message, ...) ON_DWERROR(dword, {}, message, ##__VA_ARGS__)
+#define INSPECT_DWERROR(dword, message, ...) ON_DWERROR(dword, {}, message __VA_OPT__(, ) __VA_ARGS__)
 
-#define ON_NTERROR(ntstatus, on_error, message, ...)        \
-    {                                                       \
-        DWORD status = (ntstatus);                          \
-        if (!NT_SUCCESS(status))                            \
-        {                                                   \
-            LOG(message ": 0x%08X", ##__VA_ARGS__, status); \
-            on_error;                                       \
-        }                                                   \
+#define ON_NTERROR(ntstatus, on_error, message, ...)                    \
+    {                                                                   \
+        DWORD status = (ntstatus);                                      \
+        if (!NT_SUCCESS(status))                                        \
+        {                                                               \
+            LOG(message ": 0x%08X" __VA_OPT__(, ) __VA_ARGS__, status); \
+            on_error;                                                   \
+        }                                                               \
     }
 
-#define INSPECT_NTERROR(ntstatus, message, ...) ON_NTERROR(ntstatus, {}, message, ##__VA_ARGS__)
+#define INSPECT_NTERROR(ntstatus, message, ...) ON_NTERROR(ntstatus, {}, message __VA_OPT__(, ) __VA_ARGS__)
 
 #define POOL_TAG 'PFWL'
 
