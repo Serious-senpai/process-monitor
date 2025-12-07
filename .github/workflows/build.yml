@@ -28,33 +28,46 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: 1.89
+          toolchain: 1.91,nightly
           target: ${{ matrix.target }}
           cache: false
           rustflags: ""
 
+      - name: Setup tools
+        if: ${{ runner.os == 'Windows' }}
+        shell: cmd
+        run: |
+          extern\wdksetup.exe /features + /log "%cd%\wdksetup.log" /quiet
+          cargo install --locked cargo-wdk
+
       - name: Build Windows dynamic library
         if: ${{ runner.os == 'Windows' }}
+        shell: cmd
         working-directory: windows-listener
         run: cargo wdk build --profile release --target-arch ${{ matrix.arch }}
 
       - name: Build Linux dynamic library
         if: ${{ runner.os == 'Linux' }}
         working-directory: linux-listener
-        run: cargo build --release
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Build user-mode application
-        run: cmake -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ --no-warn-unused-cli -S . -B build -G "MinGW Makefiles"
+        run: |
+          cmake -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ --no-warn-unused-cli -S . -B build -G "MinGW Makefiles"
+          cmake --build build
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.os }}-${{ matrix.target }}
           path: |
+            wdksetup.log
             build/ProcessMonitorClient.exe
             windows-listener/target/${{ matrix.target }}/release/windows-listener.dll
             windows-listener/target/${{ matrix.target }}/release/windows_listener_driver_package
