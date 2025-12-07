@@ -12,18 +12,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, linux-latest]
-        include:
-          - os: windows-latest
-            arch: arm64
-            target: aarch64-pc-windows-msvc
-
-          - os: windows-latest
-            arch: amd64
-            target: x86_64-pc-windows-msvc
-
-          - os: linux-latest
-            target: x86_64-unknown-linux-gnu
+        os: [windows-latest, ubuntu-latest]
+        arch: [arm64, amd64]
 
     steps:
       - name: Checkout repository
@@ -31,13 +21,33 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Set target triple
+        if: ${{ runner.os == 'Windows' && matrix.arch == 'arm64' }}
+        run: echo "target=aarch64-pc-windows-msvc" >> "$GITHUB_ENV"
+
+      - name: Set target triple
+        if: ${{ runner.os == 'Windows' && matrix.arch == 'amd64' }}
+        run: echo "target=x86_64-pc-windows-msvc" >> "$GITHUB_ENV"
+
+      - name: Set target triple
+        if: ${{ runner.os == 'Linux' && matrix.arch == 'arm64' }}
+        run: echo "target=aarch64-unknown-linux-gnu" >> "$GITHUB_ENV"
+
+      - name: Set target triple
+        if: ${{ runner.os == 'Linux' && matrix.arch == 'amd64' }}
+        run: echo "target=x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: 1.91,nightly
-          target: ${{ matrix.target }}
+          target: ${{ env.target }}
           cache: false
           rustflags: ""
+
+      - name: Add msbuild to PATH
+        if: ${{ runner.os == 'Windows' }}
+        uses: microsoft/setup-msbuild@v2
 
       - name: Setup tools
         if: ${{ runner.os == 'Windows' }}
@@ -48,14 +58,18 @@ jobs:
 
       - name: Build Windows dynamic library
         if: ${{ runner.os == 'Windows' }}
-        shell: cmd
         working-directory: windows-listener
-        run: cargo wdk build --profile release --target-arch ${{ matrix.arch }}
+        run: |
+          cargo wdk build --profile release --target-arch ${{ matrix.arch }}
+
+          $dll = Test-Path "target/${{ env.target }}/release/windows_listener.dll"
+          $package = Test-Path "target/${{ env.target }}/release/windows_listener_driver_package"
+          exit ($(if ($dll -and $package) { 0 } else { 1 }))
 
       - name: Build Linux dynamic library
         if: ${{ runner.os == 'Linux' }}
         working-directory: linux-listener
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ env.target }}
 
       - name: Build user-mode application
         run: |
@@ -65,10 +79,10 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.os }}-${{ matrix.target }}
+          name: build-${{ matrix.os }}-${{ env.target }}
           path: |
             wdksetup.log
             build/ProcessMonitorClient.exe
-            windows-listener/target/${{ matrix.target }}/release/windows-listener.dll
-            windows-listener/target/${{ matrix.target }}/release/windows_listener_driver_package
-            linux-listener/target/${{ matrix.target }}/release/liblinux_listener.so
+            windows-listener/target/${{ env.target }}/release/windows-listener.dll
+            windows-listener/target/${{ env.target }}/release/windows_listener_driver_package
+            linux-listener/target/${{ env.target }}/release/liblinux_listener.so
