@@ -20,7 +20,6 @@
  */
 
 #include <iostream>
-#include <fstream>
 #include <thread>
 #include <atomic>
 #include <mutex>
@@ -29,10 +28,12 @@
 #include <chrono>
 #include <csignal>
 #include <cstring>
+#include <memory>
 
 #include "protocol.hpp"
 #include "json_parser.hpp"
 #include "net.hpp"
+#include "fs.hpp"
 #include "generated/listener.hpp"
 
 using namespace std::chrono_literals;
@@ -40,7 +41,7 @@ using namespace std::chrono_literals;
 // Global state
 static std::atomic<bool> g_running{true};
 static std::mutex g_log_mutex;
-static std::ofstream g_log_file;
+static std::unique_ptr<fs::File> g_log_file;
 static std::mutex g_config_mutex;
 static std::vector<protocol::ProcessConfigEntry> g_config;
 static std::string g_config_json;
@@ -60,12 +61,13 @@ void log_violation(const protocol::ViolationEventData &event)
     std::string log_line = protocol::format_violation_log(event);
 
     std::lock_guard<std::mutex> lock(g_log_mutex);
-    if (g_log_file.is_open())
+    if (g_log_file)
     {
-        g_log_file << log_line << std::endl;
-        g_log_file.flush();
+        log_line += "\n";
+        g_log_file->write(std::span<const char>(log_line.data(), log_line.size()));
+        g_log_file->flush();
     }
-    std::cout << "[CTB] Logged: " << log_line << std::endl;
+    std::cout << "[CTB] Logged: " << log_line;
 }
 
 /**
@@ -255,22 +257,40 @@ void handle_cta_client(net::TcpStream stream, std::string client_addr)
 /**
  * @brief Load configuration from a JSON file
  */
-bool load_config_from_file(const std::string &path)
+bool load_config_from_file(const std::string &filepath)
 {
-    std::ifstream file(path);
-    if (!file.is_open())
+    auto file_result = fs::File::open(filepath);
+    if (file_result.is_err())
     {
-        std::cerr << "[CTB] Cannot open config file: " << path << std::endl;
+        std::cerr << "[CTB] Cannot open config file: " << filepath << std::endl;
         return false;
     }
 
-    std::string json((std::istreambuf_iterator<char>(file)),
-                     std::istreambuf_iterator<char>());
+    auto file = std::move(file_result).into_ok();
+
+    // Read entire file into string
+    std::string json;
+    char buffer[4096];
+    while (true)
+    {
+        auto read_result = file.read(std::span<char>(buffer, sizeof(buffer)));
+        if (read_result.is_err())
+        {
+            std::cerr << "[CTB] Error reading config file: " << filepath << std::endl;
+            return false;
+        }
+        size_t bytes_read = read_result.unwrap();
+        if (bytes_read == 0)
+        {
+            break;
+        }
+        json.append(buffer, bytes_read);
+    }
 
     std::vector<protocol::ProcessConfigEntry> config;
     if (!json_parser::parse_config(json, config))
     {
-        std::cerr << "[CTB] Failed to parse config file: " << path << std::endl;
+        std::cerr << "[CTB] Failed to parse config file: " << filepath << std::endl;
         return false;
     }
 
@@ -280,7 +300,7 @@ bool load_config_from_file(const std::string &path)
         g_config_json = json;
     }
 
-    std::cout << "[CTB] Loaded configuration from " << path << std::endl;
+    std::cout << "[CTB] Loaded configuration from " << filepath << std::endl;
     return true;
 }
 
@@ -409,13 +429,18 @@ int main(int argc, char **argv)
 
     std::cout << "[CTB] Process Monitor Log Server starting..." << std::endl;
 
-    // Open log file
-    g_log_file.open(log_path, std::ios::app);
-    if (!g_log_file.is_open())
+    // Open log file using fs::OpenOptions (append mode)
+    auto log_file_result = fs::OpenOptions()
+                               .write(true)
+                               .create(true)
+                               .append(true)
+                               .open(log_path);
+    if (log_file_result.is_err())
     {
         std::cerr << "[CTB] Failed to open log file: " << log_path << std::endl;
         return 1;
     }
+    g_log_file = std::make_unique<fs::File>(std::move(log_file_result).into_ok());
     std::cout << "[CTB] Logging to " << log_path << std::endl;
 
     // Load initial configuration if specified
@@ -508,13 +533,10 @@ int main(int argc, char **argv)
         }
     }
 
-    // Close log file
+    // Close log file (fs::File closes automatically when going out of scope / reset)
     {
         std::lock_guard<std::mutex> lock(g_log_mutex);
-        if (g_log_file.is_open())
-        {
-            g_log_file.close();
-        }
+        g_log_file.reset();
     }
 
     std::cout << "[CTB] Shutdown complete" << std::endl;

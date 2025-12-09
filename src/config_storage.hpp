@@ -10,14 +10,13 @@
 #pragma once
 
 #include "protocol.hpp"
+#include "fs.hpp"
 #include <vector>
 #include <string>
 
 #ifdef _WIN32
 #include <windows.h>
 #else
-#include <fstream>
-#include <sys/stat.h>
 #include <unistd.h>
 #include <pwd.h>
 #endif
@@ -108,31 +107,52 @@ namespace config_storage
         return result == ERROR_SUCCESS;
 
 #else
-        std::string path = get_config_file_path();
+        path::PathBuf filepath = get_config_file_path();
 
-        // Create directory if needed
-        size_t last_slash = path.rfind('/');
-        if (last_slash != std::string::npos)
+        // Create directory recursively if needed using fs::create_dir_all
+        path::PathBuf dir = filepath.parent_path();
+        if (!dir.empty())
         {
-            std::string dir = path.substr(0, last_slash);
-            mkdir(dir.c_str(), 0755);
+            auto mkdir_result = fs::create_dir_all(dir);
+            if (mkdir_result.is_err())
+            {
+                return false;
+            }
         }
 
-        std::ofstream file(path, std::ios::binary | std::ios::trunc);
-        if (!file.is_open())
+        // Use fs::OpenOptions to create/truncate file for writing
+        auto file_result = fs::OpenOptions()
+                               .write(true)
+                               .create(true)
+                               .truncate(true)
+                               .open(filepath);
+        if (file_result.is_err())
         {
             return false;
         }
 
+        auto file = std::move(file_result).into_ok();
+
         uint32_t count = static_cast<uint32_t>(entries.size());
-        file.write(reinterpret_cast<const char *>(&count), sizeof(count));
-        if (!entries.empty())
+        auto write_result = file.write(std::span<const char>(
+            reinterpret_cast<const char *>(&count), sizeof(count)));
+        if (write_result.is_err())
         {
-            file.write(reinterpret_cast<const char *>(entries.data()),
-                       entries.size() * sizeof(protocol::ProcessConfigEntry));
+            return false;
         }
 
-        return file.good();
+        if (!entries.empty())
+        {
+            write_result = file.write(std::span<const char>(
+                reinterpret_cast<const char *>(entries.data()),
+                entries.size() * sizeof(protocol::ProcessConfigEntry)));
+            if (write_result.is_err())
+            {
+                return false;
+            }
+        }
+
+        return true;
 #endif
     }
 
@@ -210,16 +230,25 @@ namespace config_storage
         return true;
 
 #else
-        std::string path = get_config_file_path();
-        std::ifstream file(path, std::ios::binary);
-        if (!file.is_open())
+        path::PathBuf filepath = get_config_file_path();
+        auto file_result = fs::File::open(filepath);
+        if (file_result.is_err())
+        {
+            return false;
+        }
+
+        auto file = std::move(file_result).into_ok();
+
+        char count_buf[sizeof(uint32_t)];
+        auto read_result = file.read(std::span<char>(count_buf, sizeof(count_buf)));
+        if (read_result.is_err() || read_result.unwrap() != sizeof(uint32_t))
         {
             return false;
         }
 
         uint32_t count;
-        file.read(reinterpret_cast<char *>(&count), sizeof(count));
-        if (!file.good() || count > 10000) // Sanity check
+        memcpy(&count, count_buf, sizeof(count));
+        if (count > 10000) // Sanity check
         {
             return false;
         }
@@ -227,11 +256,17 @@ namespace config_storage
         entries.resize(count);
         if (count > 0)
         {
-            file.read(reinterpret_cast<char *>(entries.data()),
-                      count * sizeof(protocol::ProcessConfigEntry));
+            size_t entries_size = count * sizeof(protocol::ProcessConfigEntry);
+            read_result = file.read(std::span<char>(
+                reinterpret_cast<char *>(entries.data()), entries_size));
+            if (read_result.is_err() || read_result.unwrap() != entries_size)
+            {
+                entries.clear();
+                return false;
+            }
         }
 
-        return file.good();
+        return true;
 #endif
     }
 }

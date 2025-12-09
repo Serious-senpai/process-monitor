@@ -10,6 +10,7 @@
 #pragma once
 
 #include "protocol.hpp"
+#include "fs.hpp"
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,17 +18,15 @@
 #include <chrono>
 #include <mutex>
 #include <optional>
+#include <sstream>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <psapi.h>
 #include <tlhelp32.h>
 #else
-#include <dirent.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <fstream>
-#include <sstream>
 #endif
 
 namespace process_monitor
@@ -141,18 +140,22 @@ namespace process_monitor
             snapshot.timestamp = std::chrono::steady_clock::now();
 
             // Read /proc/pid/stat for CPU time and memory
-            std::string stat_path = "/proc/" + std::to_string(pid) + "/stat";
-            std::ifstream stat_file(stat_path);
-            if (!stat_file.is_open())
+            path::PathBuf stat_path = "/proc/" + std::to_string(pid) + "/stat";
+            auto stat_file_result = fs::File::open(stat_path);
+            if (stat_file_result.is_err())
             {
                 return std::nullopt;
             }
 
-            std::string line;
-            if (!std::getline(stat_file, line))
+            auto stat_file = std::move(stat_file_result).into_ok();
+            char stat_buffer[1024];
+            auto read_result = stat_file.read(std::span<char>(stat_buffer, sizeof(stat_buffer) - 1));
+            if (read_result.is_err())
             {
                 return std::nullopt;
             }
+            stat_buffer[read_result.unwrap()] = '\0';
+            std::string line(stat_buffer);
 
             // Parse /proc/pid/stat
             // Format: pid (comm) state ppid pgrp session tty_nr tpgid flags
@@ -205,22 +208,31 @@ namespace process_monitor
             snapshot.memory_bytes = rss * page_size;
 
             // Read /proc/pid/io for disk I/O
-            std::string io_path = "/proc/" + std::to_string(pid) + "/io";
-            std::ifstream io_file(io_path);
+            path::PathBuf io_path = "/proc/" + std::to_string(pid) + "/io";
             snapshot.disk_read_bytes = 0;
             snapshot.disk_write_bytes = 0;
 
-            if (io_file.is_open())
+            auto io_file_result = fs::File::open(io_path);
+            if (io_file_result.is_ok())
             {
-                while (std::getline(io_file, line))
+                auto io_file = std::move(io_file_result).into_ok();
+                char io_buffer[512];
+                auto io_read_result = io_file.read(std::span<char>(io_buffer, sizeof(io_buffer) - 1));
+                if (io_read_result.is_ok())
                 {
-                    if (line.compare(0, 12, "read_bytes: ") == 0)
+                    io_buffer[io_read_result.unwrap()] = '\0';
+                    std::istringstream io_stream(io_buffer);
+                    std::string io_line;
+                    while (std::getline(io_stream, io_line))
                     {
-                        snapshot.disk_read_bytes = std::stoull(line.substr(12));
-                    }
-                    else if (line.compare(0, 13, "write_bytes: ") == 0)
-                    {
-                        snapshot.disk_write_bytes = std::stoull(line.substr(13));
+                        if (io_line.compare(0, 12, "read_bytes: ") == 0)
+                        {
+                            snapshot.disk_read_bytes = std::stoull(io_line.substr(12));
+                        }
+                        else if (io_line.compare(0, 13, "write_bytes: ") == 0)
+                        {
+                            snapshot.disk_write_bytes = std::stoull(io_line.substr(13));
+                        }
                     }
                 }
             }
@@ -367,55 +379,69 @@ namespace process_monitor
             CloseHandle(snapshot);
 
 #else
-            DIR *proc_dir = opendir("/proc");
-            if (!proc_dir)
+            // Use fs::read_dir to enumerate /proc directory
+            auto proc_dir = fs::read_dir("/proc");
+            auto entry_result = proc_dir.begin();
+            if (entry_result.is_err())
             {
                 return result;
             }
 
-            struct dirent *entry;
-            while ((entry = readdir(proc_dir)) != nullptr)
+            auto entry = std::move(entry_result).into_ok();
+            while (true)
             {
-                // Check if this is a PID directory
-                if (entry->d_type != DT_DIR)
-                {
-                    continue;
-                }
+                const auto &entry_path = entry.path();
+                std::string filename = entry_path.filename().string();
 
+                // Check if this is a PID directory (all digits)
                 uint32_t pid = 0;
-                for (const char *p = entry->d_name; *p; p++)
+                bool is_pid = !filename.empty();
+                for (char c : filename)
                 {
-                    if (*p < '0' || *p > '9')
+                    if (c < '0' || c > '9')
                     {
-                        pid = 0;
+                        is_pid = false;
                         break;
                     }
-                    pid = pid * 10 + (*p - '0');
+                    pid = pid * 10 + (c - '0');
                 }
 
-                if (pid == 0)
+                if (is_pid && pid > 0)
                 {
-                    continue;
+                    // Read comm file using fs::File
+                    path::PathBuf comm_path = entry_path / "comm";
+                    auto comm_file_result = fs::File::open(comm_path);
+                    if (comm_file_result.is_ok())
+                    {
+                        auto comm_file = std::move(comm_file_result).into_ok();
+                        char comm_buffer[256];
+                        auto read_result = comm_file.read(std::span<char>(comm_buffer, sizeof(comm_buffer) - 1));
+                        if (read_result.is_ok() && read_result.unwrap() > 0)
+                        {
+                            size_t len = read_result.unwrap();
+                            // Remove trailing newline
+                            if (len > 0 && comm_buffer[len - 1] == '\n')
+                            {
+                                len--;
+                            }
+                            comm_buffer[len] = '\0';
+                            std::string comm(comm_buffer);
+
+                            if (names.find(comm) != names.end())
+                            {
+                                result[pid] = comm;
+                            }
+                        }
+                    }
                 }
 
-                // Read comm file
-                std::string comm_path = "/proc/" + std::string(entry->d_name) + "/comm";
-                std::ifstream comm_file(comm_path);
-                if (!comm_file.is_open())
+                // Move to next entry
+                auto next_result = entry.next();
+                if (next_result.is_err() || !next_result.unwrap())
                 {
-                    continue;
-                }
-
-                std::string comm;
-                std::getline(comm_file, comm);
-
-                if (names.find(comm) != names.end())
-                {
-                    result[pid] = comm;
+                    break;
                 }
             }
-
-            closedir(proc_dir);
 #endif
 
             return result;
