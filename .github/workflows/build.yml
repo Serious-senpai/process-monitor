@@ -23,11 +23,11 @@ jobs:
 
       - name: Set target triple
         if: ${{ runner.os == 'Windows' && matrix.arch == 'arm64' }}
-        run: echo CARGO_BUILD_TARGET=aarch64-pc-windows-msvc>>%GITHUB_ENV%
+        run: echo "CARGO_BUILD_TARGET=aarch64-pc-windows-msvc" >> "$env:GITHUB_ENV"
 
       - name: Set target triple
         if: ${{ runner.os == 'Windows' && matrix.arch == 'amd64' }}
-        run: echo CARGO_BUILD_TARGET=x86_64-pc-windows-msvc>>%GITHUB_ENV%
+        run: echo "CARGO_BUILD_TARGET=x86_64-pc-windows-msvc" >> "$env:GITHUB_ENV"
 
       - name: Set target triple
         if: ${{ runner.os == 'Linux' && matrix.arch == 'arm64' }}
@@ -70,6 +70,7 @@ jobs:
         working-directory: windows-listener
         run: |
           cmd /c "cargo wdk build --profile release --target-arch ${{ matrix.arch }} || exit 0"
+          tree /f
 
           if exist "target\${{ env.CARGO_BUILD_TARGET }}\release\windows_listener.dll" (
             if exist "target\${{ env.CARGO_BUILD_TARGET }}\release\windows_listener_driver_package" (
