@@ -3,64 +3,61 @@
  */
 #include "net.hpp"
 
-namespace
+/**
+ * @brief RAII guard for Winsock initialization.
+ *
+ * Ensures WSAStartup is called once and WSACleanup is called on destruction.
+ */
+class WinsockInit
 {
-    /**
-     * @brief RAII guard for Winsock initialization.
-     *
-     * Ensures WSAStartup is called once and WSACleanup is called on destruction.
-     */
-    class WinsockInit
+private:
+    static bool _initialized;
+
+public:
+    static void ensure_initialized()
     {
-    private:
-        static bool _initialized;
-
-    public:
-        static void ensure_initialized()
+        if (!_initialized)
         {
-            if (!_initialized)
+            WSADATA wsaData;
+            int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+            if (result != 0)
             {
-                WSADATA wsaData;
-                int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-                if (result != 0)
-                {
-                    throw std::runtime_error("WSAStartup failed: " + std::to_string(result));
-                }
-                _initialized = true;
+                throw std::runtime_error("WSAStartup failed: " + std::to_string(result));
             }
+            _initialized = true;
         }
-    };
-
-    bool WinsockInit::_initialized = false;
-
-    io::Result<_net_impl::NativeSocketAddr> sockname(SOCKET socket, int (*getname)(SOCKET, sockaddr *, int *))
-    {
-        // Try IPv4 first
-        sockaddr_in addr_v4;
-        int len = sizeof(addr_v4);
-        if (getname(socket, reinterpret_cast<sockaddr *>(&addr_v4), &len) == 0)
-        {
-            if (addr_v4.sin_family == AF_INET)
-            {
-                return io::Result<_net_impl::NativeSocketAddr>::ok(
-                    _net_impl::NativeSocketAddr::v4(_net_impl::NativeSocketAddrV4::from_sockaddr(addr_v4)));
-            }
-        }
-
-        // Try IPv6
-        sockaddr_in6 addr_v6;
-        len = sizeof(addr_v6);
-        if (getname(socket, reinterpret_cast<sockaddr *>(&addr_v6), &len) == 0)
-        {
-            if (addr_v6.sin6_family == AF_INET6)
-            {
-                return io::Result<_net_impl::NativeSocketAddr>::ok(
-                    _net_impl::NativeSocketAddr::v6(_net_impl::NativeSocketAddrV6::from_sockaddr(addr_v6)));
-            }
-        }
-
-        return io::Result<_net_impl::NativeSocketAddr>::err(io::Error::last_os_error());
     }
+};
+
+bool WinsockInit::_initialized = false;
+
+io::Result<_net_impl::NativeSocketAddr> sockname(SOCKET socket, int (*getname)(SOCKET, sockaddr *, int *))
+{
+    // Try IPv4 first
+    sockaddr_in addr_v4;
+    int len = sizeof(addr_v4);
+    if (getname(socket, reinterpret_cast<sockaddr *>(&addr_v4), &len) == 0)
+    {
+        if (addr_v4.sin_family == AF_INET)
+        {
+            return io::Result<_net_impl::NativeSocketAddr>::ok(
+                _net_impl::NativeSocketAddr::v4(_net_impl::NativeSocketAddrV4::from_sockaddr(addr_v4)));
+        }
+    }
+
+    // Try IPv6
+    sockaddr_in6 addr_v6;
+    len = sizeof(addr_v6);
+    if (getname(socket, reinterpret_cast<sockaddr *>(&addr_v6), &len) == 0)
+    {
+        if (addr_v6.sin6_family == AF_INET6)
+        {
+            return io::Result<_net_impl::NativeSocketAddr>::ok(
+                _net_impl::NativeSocketAddr::v6(_net_impl::NativeSocketAddrV6::from_sockaddr(addr_v6)));
+        }
+    }
+
+    return io::Result<_net_impl::NativeSocketAddr>::err(io::Error::last_os_error());
 }
 
 namespace _net_impl

@@ -29,19 +29,19 @@ file(COPY_FILE "${ORIGINAL_CDYLIB}" "${COPIED_CDYLIB}")
 
 # CTA - Process Monitor Agent
 add_executable(CTA "${ROOT}/src/cta.cpp")
-target_include_directories(CTA PRIVATE "${ROOT}/src")
+target_include_directories(CTA PRIVATE "${ROOT}/src" "${ROOT}/extern/boostorg/json/include")
 target_link_libraries(CTA PRIVATE SystemLibrary "${COPIED_CDYLIB}")
-if(WIN32)
-    target_link_libraries(CTA PRIVATE psapi)
-endif()
+# if(WIN32)
+#     target_link_libraries(CTA PRIVATE psapi)
+# endif()
 
 # CTB - Process Monitor Log Server
 add_executable(CTB "${ROOT}/src/ctb.cpp")
-target_include_directories(CTB PRIVATE "${ROOT}/src")
+target_include_directories(CTB PRIVATE "${ROOT}/src" "${ROOT}/extern/boostorg/json/include")
 target_link_libraries(CTB PRIVATE SystemLibrary)
-if(WIN32)
-    target_link_libraries(CTB PRIVATE ws2_32)
-endif()
+# if(WIN32)
+#     target_link_libraries(CTB PRIVATE ws2_32)
+# endif()
 
 enable_testing()
 
