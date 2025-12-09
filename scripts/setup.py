@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# Setup script for development environment
 
 from __future__ import annotations
 

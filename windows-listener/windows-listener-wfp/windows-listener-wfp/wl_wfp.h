@@ -1,6 +1,9 @@
 #pragma once
 
-#define NDIS61 1
+#define NDIS684 1
+
+#pragma warning(push)
+#pragma warning(disable : 5103)
 
 #include <ntddk.h>
 #include <winerror.h>
@@ -10,7 +13,9 @@
 #include <fwpsk.h>
 #include <fwpmu.h>
 
-typedef struct _WFPTracer* WFPTracerHandle;
+#pragma warning(pop)
+
+typedef struct _WFPTracer *WFPTracerHandle;
 
 void free_wfp_tracer(WFPTracerHandle tracer);
 WFPTracerHandle new_wfp_tracer(

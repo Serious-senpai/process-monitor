@@ -1,6 +1,5 @@
 #!/bin/bash
-
-# Setup script for a brand new Ubuntu 24.04 virtual machine (it may still work with other versions idk)
+# Setup script for a new Ubuntu 24.04 virtual machine (it may still work with other versions idk)
 
 # Install stuff
 sudo apt-get update
