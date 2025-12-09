@@ -1,6 +1,6 @@
 /.vscode/
 /build/
 /docs/
-/src/generated/
+/process-monitor/include/generated/
 
 /run.bat

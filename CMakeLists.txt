@@ -11,7 +11,13 @@ endif()
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}" ROOT)
 message(STATUS "Got root of repository: ${ROOT}")
 
-file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${ROOT}/src/*.cpp")
+if(WIN32)
+    file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "${ROOT}/process-monitor/src/win32/*.cpp")
+elseif(UNIX)
+    file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "${ROOT}/process-monitor/src/linux/*.cpp")
+else()
+    message(FATAL_ERROR "Unsupported platform")
+endif()
 
 # Rust bindings
 if(WIN32)
@@ -28,16 +34,24 @@ message(STATUS "Copying ${ORIGINAL_CDYLIB} to ${COPIED_CDYLIB}")
 file(COPY_FILE "${ORIGINAL_CDYLIB}" "${COPIED_CDYLIB}")
 
 # CTA - Process Monitor Agent
-add_executable(CTA "${ROOT}/src/cta.cpp")
-target_include_directories(CTA PRIVATE "${ROOT}/src" "${ROOT}/extern/boostorg/json/include")
+add_executable(CTA "${ROOT}/process-monitor/src/cta.cpp" "${SOURCES}")
+target_include_directories(
+    CTA PRIVATE
+    "${ROOT}/process-monitor/include"
+    "${ROOT}/extern/json/single_include"
+)
 target_link_libraries(CTA PRIVATE SystemLibrary "${COPIED_CDYLIB}")
 # if(WIN32)
 #     target_link_libraries(CTA PRIVATE psapi)
 # endif()
 
 # CTB - Process Monitor Log Server
-add_executable(CTB "${ROOT}/src/ctb.cpp")
-target_include_directories(CTB PRIVATE "${ROOT}/src" "${ROOT}/extern/boostorg/json/include")
+add_executable(CTB "${ROOT}/process-monitor/src/ctb.cpp" "${SOURCES}")
+target_include_directories(
+    CTB PRIVATE
+    "${ROOT}/process-monitor/include"
+    "${ROOT}/extern/json/single_include"
+)
 target_link_libraries(CTB PRIVATE SystemLibrary)
 # if(WIN32)
 #     target_link_libraries(CTB PRIVATE ws2_32)

@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
 use aya_build::Toolchain;
 
 fn build_ebpf() -> anyhow::Result<()> {
@@ -36,7 +36,8 @@ fn generate_c_header() -> anyhow::Result<()> {
     let headers_dir = linux_listener_dir
         .join("..")
         .join("..")
-        .join("src")
+        .join("process-monitor")
+        .join("include")
         .join("generated");
 
     cbindgen_base::default(&linux_listener_dir)
