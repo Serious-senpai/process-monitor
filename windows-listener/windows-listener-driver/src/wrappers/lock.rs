@@ -2,26 +2,19 @@ use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 use core::ops::{Deref, DerefMut};
 
-use wdk_sys::ntddk::{
-    KeAcquireSpinLockAtDpcLevel, KeAcquireSpinLockRaiseToDpc, KeGetCurrentIrql,
-    KeInitializeSpinLock, KeReleaseSpinLock, KeReleaseSpinLockFromDpcLevel,
-};
-use wdk_sys::{DISPATCH_LEVEL, KSPIN_LOCK};
+use wdk_sys::KSPIN_LOCK;
+use wdk_sys::ntddk::{KeAcquireSpinLockRaiseToDpc, KeInitializeSpinLock, KeReleaseSpinLock};
 
 pub struct SpinLockGuard<'a, T> {
     _inner: &'a SpinLock<T>,
-    _old_irql: Option<u8>,
+    _old_irql: u8,
 }
 
 impl<T> Drop for SpinLockGuard<'_, T> {
     fn drop(&mut self) {
         let lock = &self._inner._lock as *const KSPIN_LOCK as *mut KSPIN_LOCK;
         unsafe {
-            if let Some(irql) = self._old_irql {
-                KeReleaseSpinLock(lock, irql);
-            } else {
-                KeReleaseSpinLockFromDpcLevel(lock);
-            }
+            KeReleaseSpinLock(lock, self._old_irql);
         }
     }
 }
@@ -66,15 +59,7 @@ impl<T> SpinLock<T> {
     /// `DISPATCH_LEVEL`.
     pub fn acquire(&self) -> SpinLockGuard<'_, T> {
         let lock = &self._lock as *const KSPIN_LOCK as *mut KSPIN_LOCK;
-        let irql = unsafe {
-            let irql = KeGetCurrentIrql();
-            if u32::from(irql) >= DISPATCH_LEVEL {
-                KeAcquireSpinLockAtDpcLevel(lock);
-                None
-            } else {
-                Some(KeAcquireSpinLockRaiseToDpc(lock))
-            }
-        };
+        let irql = unsafe { KeAcquireSpinLockRaiseToDpc(lock) };
 
         SpinLockGuard {
             _inner: self,
