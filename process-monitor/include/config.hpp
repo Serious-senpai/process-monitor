@@ -3,7 +3,7 @@
 #include "io.hpp"
 #include "generated/types.hpp"
 
-namespace config
+namespace procmon
 {
     struct ConfigEntry
     {

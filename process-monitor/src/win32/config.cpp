@@ -18,7 +18,7 @@ public:
     }
 };
 
-namespace config
+namespace procmon
 {
     io::Result<std::vector<ConfigEntry>> load_config()
     {
