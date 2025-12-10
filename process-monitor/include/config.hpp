@@ -7,7 +7,7 @@ namespace config
 {
     struct ConfigEntry
     {
-        std::string name;
+        StaticCommandName name;
         Threshold threshold;
     };
 
