@@ -19,8 +19,6 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 
-// #pragma comment(lib, "Ws2_32.lib")
-
 #elif defined(__linux__)
 
 #define _FILE_OFFSET_BITS 64
