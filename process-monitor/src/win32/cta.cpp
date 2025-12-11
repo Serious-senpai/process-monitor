@@ -135,6 +135,17 @@ struct LoopContext
 
 bool stopped = false;
 
+BOOL WINAPI ctrl_handler(DWORD ctrl_type)
+{
+    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT)
+    {
+        std::cout << "\nShutting down..." << std::endl;
+        stopped = true;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 DWORD loop(LPVOID param)
 {
     auto context = static_cast<LoopContext *>(param);
@@ -170,6 +181,11 @@ DWORD loop(LPVOID param)
 int cta_main()
 {
     initialize_logger(4);
+
+    if (!SetConsoleCtrlHandler(ctrl_handler, TRUE))
+    {
+        std::cerr << "Failed to set console control handler: " << GetLastError() << std::endl;
+    }
 
     LoopContext context;
     InitializeCriticalSection(&context.monitored_pids_cs);
