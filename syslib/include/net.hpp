@@ -12,8 +12,6 @@
 #include "linux/net.hpp"
 #endif
 
-#include <chrono>
-
 namespace net
 {
     /**

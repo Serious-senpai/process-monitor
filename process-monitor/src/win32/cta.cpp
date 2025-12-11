@@ -1,4 +1,5 @@
 #include "config.hpp"
+#include "utils.hpp"
 #include "generated/listener.hpp"
 
 #include <tlhelp32.h>
@@ -123,6 +124,7 @@ public:
 
 struct ProcessMetric
 {
+    HANDLE process;
     _CPUMetric cpu;
     _MemoryMetric memory;
     _ExitMetric exit;
@@ -152,39 +154,7 @@ HANDLE open_process(DWORD pid)
     return OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
 }
 
-DWORD loop(LPVOID param)
-{
-    auto context = static_cast<LoopContext *>(param);
-
-    while (!stopped)
-    {
-        Sleep(1000);
-
-        _CriticalSectionGuard guard(&context->monitored_pids_cs);
-        for (auto iter = context->monitored_pids.begin(); iter != context->monitored_pids.end() && !stopped;)
-        {
-            auto pid = iter->first;
-            auto &metric = iter->second;
-
-            auto cpu = metric.cpu.refresh();
-            auto memory = metric.memory.memory_usage();
-
-            if (metric.exit.exited())
-            {
-                iter = context->monitored_pids.erase(iter);
-            }
-            else
-            {
-                std::cout << "PID " << pid << ": CPU " << static_cast<double>(cpu) / 1000.0 << "%, Memory " << memory / 1024 << " KB" << std::endl;
-                iter++;
-            }
-        }
-    }
-
-    return 0;
-}
-
-void populate_initial_processes(std::unordered_map<uint64_t, ProcessMetric> &monitored_pids, const std::vector<std::string> &targets)
+void populate_initial_processes(std::unordered_map<uint64_t, ProcessMetric> &monitored_pids, const std::vector<const char *> &targets)
 {
     auto processes = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (processes != INVALID_HANDLE_VALUE)
@@ -198,12 +168,12 @@ void populate_initial_processes(std::unordered_map<uint64_t, ProcessMetric> &mon
             {
                 for (auto &target : targets)
                 {
-                    if (std::strcmp(target.c_str(), pe.szExeFile) == 0)
+                    if (std::strcmp(target, pe.szExeFile) == 0)
                     {
                         HANDLE process = open_process(pe.th32ProcessID);
                         if (process != NULL)
                         {
-                            monitored_pids.emplace(pe.th32ProcessID, ProcessMetric{_CPUMetric(process), _MemoryMetric(process), _ExitMetric(process)});
+                            monitored_pids.emplace(pe.th32ProcessID, ProcessMetric{process, _CPUMetric(process), _MemoryMetric(process), _ExitMetric(process)});
                         }
                     }
                 }
@@ -214,7 +184,77 @@ void populate_initial_processes(std::unordered_map<uint64_t, ProcessMetric> &mon
     }
 }
 
-int cta_main()
+KernelTracerHandle *tracer = nullptr;
+LoopContext context;
+
+DWORD loop(LPVOID param)
+{
+    while (!stopped)
+    {
+        Sleep(1000);
+
+        _CriticalSectionGuard guard(&context.monitored_pids_cs);
+        for (auto iter = context.monitored_pids.begin(); iter != context.monitored_pids.end() && !stopped;)
+        {
+            auto pid = iter->first;
+            auto &metric = iter->second;
+
+            auto cpu = metric.cpu.refresh();
+            auto memory = metric.memory.memory_usage();
+
+            if (metric.exit.exited())
+            {
+                CloseHandle(metric.process);
+                iter = context.monitored_pids.erase(iter);
+            }
+            else
+            {
+                std::cout << "PID " << pid << ": CPU " << static_cast<double>(cpu) / 1000.0 << "%, Memory " << memory / 1024 << " KB" << std::endl;
+                iter++;
+            }
+        }
+    }
+
+    return 0;
+}
+
+void update_config(const std::vector<procmon::ConfigEntry> &entries)
+{
+    if (tracer == nullptr)
+    {
+        return;
+    }
+
+    clear_monitor(tracer);
+
+    std::vector<const char *> targets;
+    targets.reserve(entries.size());
+    for (const auto &entry : entries)
+    {
+        auto target = reinterpret_cast<const char *>(entry.name);
+        set_monitor(tracer, target, &entry.threshold);
+        targets.push_back(target);
+    }
+
+    procmon::save_config(entries);
+    populate_initial_processes(context.monitored_pids, targets);
+}
+
+DWORD connect_loop(LPVOID param)
+{
+    auto connect = reinterpret_cast<ConnectFunc>(param);
+    connect(
+        &stopped,
+        [](uint64_t ms)
+        {
+            Sleep(ms);
+        },
+        update_config);
+
+    return 0;
+}
+
+int cta_main(ConnectFunc connect)
 {
     initialize_logger(4);
 
@@ -223,31 +263,25 @@ int cta_main()
         std::cerr << "Failed to set console control handler: " << GetLastError() << std::endl;
     }
 
-    LoopContext context;
     InitializeCriticalSection(&context.monitored_pids_cs);
 
-    auto tracer = new_tracer();
+    tracer = new_tracer();
     if (tracer == nullptr)
     {
         std::cerr << "Failed to create tracer" << std::endl;
         return 1;
     }
 
-    Threshold default_threshold;
-    default_threshold.thresholds[0] = 0;
-    default_threshold.thresholds[1] = 0;
-    default_threshold.thresholds[2] = 0;
-    default_threshold.thresholds[3] = 0;
-    set_monitor(tracer, "curl.exe", &default_threshold);
-    set_monitor(tracer, "notepad.exe", &default_threshold);
-
-    populate_initial_processes(context.monitored_pids, {"curl.exe", "notepad.exe"});
+    auto config = procmon::load_config();
+    std::vector<procmon::ConfigEntry> entries = config.is_ok() ? config.unwrap() : std::vector<procmon::ConfigEntry>{};
+    update_config(entries);
 
     auto thread = CreateThread(NULL, 0, loop, &context, 0, NULL);
+    auto connect_thread = CreateThread(NULL, 0, connect_loop, reinterpret_cast<LPVOID>(connect), 0, NULL);
 
     while (!stopped)
     {
-        auto event = next_event(tracer, INFINITE);
+        auto event = next_event(tracer, 1000);
         if (event != nullptr)
         {
             if (event->variant == EventType::NewProcess)
@@ -257,7 +291,7 @@ int cta_main()
                 if (process != NULL)
                 {
                     _CriticalSectionGuard guard(&context.monitored_pids_cs);
-                    context.monitored_pids.emplace(pid, ProcessMetric{_CPUMetric(process), _MemoryMetric(process), _ExitMetric(process)});
+                    context.monitored_pids.emplace(pid, ProcessMetric{process, _CPUMetric(process), _MemoryMetric(process), _ExitMetric(process)});
                     std::cout << "Started monitoring PID " << pid << std::endl;
                 }
                 else
@@ -273,6 +307,9 @@ int cta_main()
             drop_event(event);
         }
     }
+
+    WaitForSingleObject(connect_thread, INFINITE);
+    CloseHandle(connect_thread);
 
     WaitForSingleObject(thread, INFINITE);
     CloseHandle(thread);

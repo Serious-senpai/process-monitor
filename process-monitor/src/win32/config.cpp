@@ -5,14 +5,14 @@ constexpr LPCWSTR _REGISTRY_KEY = L"Software\\ProcessMonitor";
 constexpr LPCWSTR _REGISTRY_VALUE_NAME = L"Config";
 constexpr DWORD _REGISTRY_SIZE_LIMIT = 8192;
 
-class _RegistryKeyHandler
+class _RegistryKeyGuard
 {
 public:
     HKEY key;
 
-    explicit _RegistryKeyHandler(HKEY key) : key(key) {}
+    explicit _RegistryKeyGuard(HKEY key) : key(key) {}
 
-    ~_RegistryKeyHandler()
+    ~_RegistryKeyGuard()
     {
         RegCloseKey(key);
     }
@@ -38,7 +38,7 @@ namespace procmon
             return io::Result<std::vector<ConfigEntry>>::err(io::Error::from_raw_os_error(status));
         }
 
-        _RegistryKeyHandler key(hkey);
+        _RegistryKeyGuard key(hkey);
 
         DWORD size = 0;
         status = RegQueryValueExW(hkey, _REGISTRY_VALUE_NAME, NULL, NULL, NULL, &size);
@@ -88,7 +88,7 @@ namespace procmon
             return io::Result<std::monostate>::err(io::Error::from_raw_os_error(status));
         }
 
-        _RegistryKeyHandler key(hkey);
+        _RegistryKeyGuard key(hkey);
 
         constexpr DWORD max_entries = _REGISTRY_SIZE_LIMIT / sizeof(ConfigEntry);
         if (entries.size() > max_entries)

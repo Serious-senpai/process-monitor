@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -7,11 +8,10 @@
 #include <format>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <string>
 #include <variant>
-#include <chrono>
-#include <optional>
 
 #ifdef _WIN32
 
