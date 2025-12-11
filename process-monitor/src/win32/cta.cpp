@@ -1,4 +1,6 @@
 #include "config.hpp"
+#include "generated/listener.hpp"
+
 #include <psapi.h>
 
 class _CriticalSectionGuard
@@ -131,18 +133,18 @@ struct LoopContext
     std::unordered_map<uint64_t, ProcessMetric> monitored_pids;
 };
 
-LoopContext CTA_CONTEXT;
+bool stopped = false;
 
-void loop()
+DWORD loop(LPVOID param)
 {
-    InitializeCriticalSection(&CTA_CONTEXT.monitored_pids_cs);
+    auto context = static_cast<LoopContext *>(param);
 
-    while (true)
+    while (!stopped)
     {
         Sleep(1000);
 
-        _CriticalSectionGuard guard(&CTA_CONTEXT.monitored_pids_cs);
-        for (auto iter = CTA_CONTEXT.monitored_pids.begin(); iter != CTA_CONTEXT.monitored_pids.end();)
+        _CriticalSectionGuard guard(&context->monitored_pids_cs);
+        for (auto iter = context->monitored_pids.begin(); iter != context->monitored_pids.end() && !stopped;)
         {
             auto pid = iter->first;
             auto &metric = iter->second;
@@ -152,7 +154,7 @@ void loop()
 
             if (metric.exit.exited())
             {
-                iter = CTA_CONTEXT.monitored_pids.erase(iter);
+                iter = context->monitored_pids.erase(iter);
             }
             else
             {
@@ -162,20 +164,67 @@ void loop()
         }
     }
 
-    DeleteCriticalSection(&CTA_CONTEXT.monitored_pids_cs);
+    return 0;
 }
 
 int cta_main()
 {
-    auto process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, 15756);
-    CTA_CONTEXT.monitored_pids.emplace(
-        15756,
-        ProcessMetric{
-            _CPUMetric(process),
-            _MemoryMetric(process),
-            _ExitMetric(process)});
+    initialize_logger(4);
 
-    loop();
+    LoopContext context;
+    InitializeCriticalSection(&context.monitored_pids_cs);
+
+    auto tracer = new_tracer();
+    if (tracer == nullptr)
+    {
+        std::cerr << "Failed to create tracer" << std::endl;
+        return 1;
+    }
+
+    Threshold default_threshold;
+    default_threshold.thresholds[0] = 0;
+    default_threshold.thresholds[1] = 0;
+    default_threshold.thresholds[2] = 0;
+    default_threshold.thresholds[3] = 0;
+    set_monitor(tracer, "curl.exe", &default_threshold);
+    set_monitor(tracer, "notepad.exe", &default_threshold);
+
+    auto thread = CreateThread(NULL, 0, loop, &context, 0, NULL);
+
+    while (!stopped)
+    {
+        auto event = next_event(tracer, INFINITE);
+        if (event != nullptr)
+        {
+            if (event->variant == EventType::NewProcess)
+            {
+                auto pid = event->pid;
+                HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+                if (process != NULL)
+                {
+                    _CriticalSectionGuard guard(&context.monitored_pids_cs);
+                    context.monitored_pids.emplace(pid, ProcessMetric{_CPUMetric(process), _MemoryMetric(process), _ExitMetric(process)});
+                    std::cout << "Started monitoring PID " << pid << std::endl;
+                }
+                else
+                {
+                    std::cerr << "Failed to open process " << pid << ": " << GetLastError() << std::endl;
+                }
+            }
+            else if (event->variant == EventType::Violation)
+            {
+                std::cout << "PID " << event->pid << " violated threshold " << static_cast<int>(event->data.violation.metric) << ": " << event->data.violation.value << std::endl;
+            }
+
+            drop_event(event);
+        }
+    }
+
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+
+    free_tracer(tracer);
+    DeleteCriticalSection(&context.monitored_pids_cs);
 
     return 0;
 }

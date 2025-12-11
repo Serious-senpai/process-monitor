@@ -52,7 +52,7 @@ target_include_directories(
     "${ROOT}/process-monitor/include"
     "${ROOT}/extern/json/single_include"
 )
-target_link_libraries(CTB PRIVATE SystemLibrary)
+target_link_libraries(CTB PRIVATE SystemLibrary "${COPIED_CDYLIB}")
 # if(WIN32)
 #     target_link_libraries(CTB PRIVATE ws2_32)
 # endif()
