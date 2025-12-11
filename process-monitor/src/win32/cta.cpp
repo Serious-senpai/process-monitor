@@ -1,6 +1,7 @@
 #include "config.hpp"
 #include "generated/listener.hpp"
 
+#include <tlhelp32.h>
 #include <psapi.h>
 
 class _CriticalSectionGuard
@@ -146,6 +147,11 @@ BOOL WINAPI ctrl_handler(DWORD ctrl_type)
     return FALSE;
 }
 
+HANDLE open_process(DWORD pid)
+{
+    return OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+}
+
 DWORD loop(LPVOID param)
 {
     auto context = static_cast<LoopContext *>(param);
@@ -178,6 +184,36 @@ DWORD loop(LPVOID param)
     return 0;
 }
 
+void populate_initial_processes(std::unordered_map<uint64_t, ProcessMetric> &monitored_pids, const std::vector<std::string> &targets)
+{
+    auto processes = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (processes != INVALID_HANDLE_VALUE)
+    {
+        PROCESSENTRY32 pe;
+        pe.dwSize = sizeof(pe);
+
+        if (Process32First(processes, &pe))
+        {
+            do
+            {
+                for (auto &target : targets)
+                {
+                    if (std::strcmp(target.c_str(), pe.szExeFile) == 0)
+                    {
+                        HANDLE process = open_process(pe.th32ProcessID);
+                        if (process != NULL)
+                        {
+                            monitored_pids.emplace(pe.th32ProcessID, ProcessMetric{_CPUMetric(process), _MemoryMetric(process), _ExitMetric(process)});
+                        }
+                    }
+                }
+            } while (Process32Next(processes, &pe));
+        }
+
+        CloseHandle(processes);
+    }
+}
+
 int cta_main()
 {
     initialize_logger(4);
@@ -205,6 +241,8 @@ int cta_main()
     set_monitor(tracer, "curl.exe", &default_threshold);
     set_monitor(tracer, "notepad.exe", &default_threshold);
 
+    populate_initial_processes(context.monitored_pids, {"curl.exe", "notepad.exe"});
+
     auto thread = CreateThread(NULL, 0, loop, &context, 0, NULL);
 
     while (!stopped)
@@ -215,7 +253,7 @@ int cta_main()
             if (event->variant == EventType::NewProcess)
             {
                 auto pid = event->pid;
-                HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+                HANDLE process = open_process(pid);
                 if (process != NULL)
                 {
                     _CriticalSectionGuard guard(&context.monitored_pids_cs);
