@@ -70,8 +70,9 @@ typedef struct _WFPTracer
 
     BOOL unloading;
     EX_SPIN_LOCK unloading_lock;
+    PDEVICE_OBJECT device;
 
-    void (*callback)(UINT64 pid, SIZE_T size);
+    void (*callback)(PDEVICE_OBJECT device, UINT64 pid, SIZE_T size);
 } WFPTracer;
 
 static NTSTATUS _register_callout(
@@ -291,7 +292,7 @@ static void NTAPI _transport_classify(
         {
             const FWPS_STREAM_CALLOUT_IO_PACKET0 *data = (const FWPS_STREAM_CALLOUT_IO_PACKET0 *)layer_data;
             const FWPS_STREAM_DATA0 *stream = data->streamData;
-            tracer->callback(pid, stream->dataLength);
+            tracer->callback(tracer->device, pid, stream->dataLength);
         }
     }
 
@@ -385,7 +386,7 @@ const FWPS_CALLOUT0 OUTGOING_ALE_TRANSPORT_V6_CALLOUT = {
     notify,
     _transport_flow_delete};
 
-void free_wfp_tracer(WFPTracer *tracer)
+void free_wfp_tracer(WFPTracerHandle tracer)
 {
     LOG("Freeing WFP tracer");
 
@@ -443,13 +444,14 @@ void free_wfp_tracer(WFPTracer *tracer)
     ExFreePool(tracer);
 }
 
-static void _dummy_callback(UINT64 pid, SIZE_T size)
+static void _dummy_callback(PDEVICE_OBJECT device, UINT64 pid, SIZE_T size)
 {
+    UNREFERENCED_PARAMETER(device);
     UNREFERENCED_PARAMETER(pid);
     UNREFERENCED_PARAMETER(size);
 }
 
-WFPTracer *new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(UINT64 pid, SIZE_T size))
+WFPTracerHandle new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(PDEVICE_OBJECT device, UINT64 pid, SIZE_T size))
 {
     LOG("Initializing new WFP tracer");
     WFPTracer *tracer = ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(WFPTracer), POOL_TAG);
@@ -462,6 +464,7 @@ WFPTracer *new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(UINT64 pid, SI
     RtlZeroMemory(tracer, sizeof(WFPTracer));
     InitializeListHead(&tracer->flow_ctx_head);
     KeInitializeSpinLock(&tracer->flow_ctx_lock);
+    tracer->device = device;
     tracer->callback = (callback == NULL ? _dummy_callback : callback);
 
     DWORD ustatus = FwpmEngineOpen0(NULL, RPC_C_AUTHN_WINNT, NULL, NULL, &tracer->filter_engine);
