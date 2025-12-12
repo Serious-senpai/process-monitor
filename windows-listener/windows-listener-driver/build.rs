@@ -30,6 +30,7 @@ fn main() -> Result<(), wdk_build::ConfigError> {
         panic!("Failed to build WFP static library");
     }
 
+    println!("cargo:rerun-if-changed={}", wfp.display());
     println!("cargo:rustc-link-search=native={}", wfp_release.display());
     println!("cargo:rustc-link-lib=static=windows-listener-wfp");
     println!("cargo:rustc-link-lib=static=fwpkclnt");

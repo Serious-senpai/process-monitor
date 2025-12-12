@@ -290,9 +290,18 @@ static void NTAPI _transport_classify(
         UINT64 pid = ctx->pid;
         if (pid != 0 && layer_data != NULL)
         {
-            const FWPS_STREAM_CALLOUT_IO_PACKET0 *data = (const FWPS_STREAM_CALLOUT_IO_PACKET0 *)layer_data;
-            const FWPS_STREAM_DATA0 *stream = data->streamData;
-            tracer->callback(tracer->device, pid, stream->dataLength);
+            const NET_BUFFER_LIST *data = (const NET_BUFFER_LIST*)layer_data;
+
+            SIZE_T total = 0;
+            for (const NET_BUFFER_LIST* nbl = data; nbl != NULL; nbl = NET_BUFFER_LIST_NEXT_NBL(nbl))
+            {
+                for (const NET_BUFFER* nb = NET_BUFFER_LIST_FIRST_NB(nbl); nb != NULL; nb = NET_BUFFER_NEXT_NB(nb))
+                {
+					total += NET_BUFFER_DATA_LENGTH(nb);
+                }
+            }
+
+            tracer->callback(tracer->device, pid, total);
         }
     }
 
