@@ -7,6 +7,7 @@ fn main() -> anyhow::Result<()> {
         .join("..")
         .join("..")
         .join("process-monitor")
+        .join("include")
         .join("generated");
 
     cbindgen_base::default(&windows_listener_dir)

@@ -37,6 +37,7 @@ fn generate_c_header() -> anyhow::Result<()> {
         .join("..")
         .join("..")
         .join("process-monitor")
+        .join("include")
         .join("generated");
 
     cbindgen_base::default(&linux_listener_dir)

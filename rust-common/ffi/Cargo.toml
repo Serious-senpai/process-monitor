@@ -9,11 +9,11 @@ std = []
 linux-user = ["dep:aya", "std", "linux-kernel"]
 linux-kernel = []
 win32-user = ["std", "win32-kernel"]
-win32-kernel = ["dep:wdk-sys"]
+win32-kernel = ["dep:wdk-sys", "serde/alloc"]
 
 [dependencies]
 aya = { workspace = true, optional = true }
-serde = { workspace = true, features = ["alloc", "derive"] }
+serde = { workspace = true, features = ["derive"] }
 wdk-sys = { workspace = true, optional = true }
 
 [build-dependencies]

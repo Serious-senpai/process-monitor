@@ -36,7 +36,7 @@ impl Drop for _MappedMemoryGuard {
 }
 
 struct _KernelTracer {
-    pub hmap: HANDLE,
+    pub _hmap: HANDLE, // Keep this handle so it doesn't get closed
     pub base: _MappedMemoryGuard,
     pub device: HANDLE,
     pub event: HANDLE,
@@ -161,7 +161,7 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
             }
 
             let tracer = Box::new(_KernelTracer {
-                hmap,
+                _hmap: hmap,
                 base,
                 device,
                 event,

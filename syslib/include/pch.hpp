@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -7,12 +8,15 @@
 #include <format>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <string>
 #include <variant>
 
 #ifdef _WIN32
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 
 #elif defined(__linux__)

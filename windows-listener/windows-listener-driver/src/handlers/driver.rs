@@ -9,8 +9,8 @@ use lru::LruCache;
 use wdk::nt_success;
 use wdk_sys::ntddk::{IoCreateDevice, IoDeleteDevice, KeQueryPerformanceCounter};
 use wdk_sys::{
-    DEVICE_OBJECT, DO_BUFFERED_IO, DO_DEVICE_INITIALIZING, DRIVER_OBJECT, FILE_DEVICE_SECURE_OPEN,
-    FILE_DEVICE_UNKNOWN, IRP, LARGE_INTEGER, STATUS_UNSUCCESSFUL,
+    DO_BUFFERED_IO, DO_DEVICE_INITIALIZING, DRIVER_OBJECT, FILE_DEVICE_SECURE_OPEN,
+    FILE_DEVICE_UNKNOWN, IRP, LARGE_INTEGER, PDEVICE_OBJECT, PDRIVER_OBJECT, STATUS_UNSUCCESSFUL,
 };
 use windows::Wdk::Storage::FileSystem::Minifilters::{
     FltRegisterFilter, FltStartFiltering, FltUnregisterFilter, PFLT_FILTER,
@@ -37,10 +37,10 @@ struct _CleanupGuard<'a> {
     pub cleanup: bool,
 }
 
-impl<'a> Drop for _CleanupGuard<'a> {
+impl Drop for _CleanupGuard<'_> {
     fn drop(&mut self) {
         if self.cleanup {
-            let _ = driver_unload(self.driver);
+            driver_unload(self.driver);
         }
     }
 }
@@ -48,8 +48,8 @@ impl<'a> Drop for _CleanupGuard<'a> {
 pub fn driver_entry(
     driver: &mut DRIVER_OBJECT,
     registry_path: UnicodeString,
-    driver_unload: unsafe extern "C" fn(*mut DRIVER_OBJECT),
-    irp_handler: unsafe extern "C" fn(*mut DEVICE_OBJECT, *mut IRP) -> i32,
+    driver_unload: unsafe extern "C" fn(PDRIVER_OBJECT),
+    irp_handler: unsafe extern "C" fn(PDEVICE_OBJECT, *mut IRP) -> i32,
 ) -> Result<(), RuntimeError> {
     let mut guard = _CleanupGuard {
         driver,
