@@ -40,6 +40,7 @@ typedef struct _FlowContext
 {
     // Entry in the global linked list
     LIST_ENTRY entry;
+    BOOL removed;
 
     // These fields are for `FwpsFlowRemoveContext0`
 
@@ -194,7 +195,7 @@ static void NTAPI _ale_classify(
     classify_out->actionType = FWP_ACTION_PERMIT;
 
     WFPTracer *tracer = (WFPTracer *)filter->context;
-    ExAcquireSpinLockSharedAtDpcLevel(&tracer->unloading_lock);
+    KIRQL old_irql = ExAcquireSpinLockShared(&tracer->unloading_lock);
 
     if (!tracer->unloading &&
         in_fixed_values != NULL &&
@@ -240,6 +241,7 @@ static void NTAPI _ale_classify(
         }
         else
         {
+            ctx->removed = FALSE;
             ctx->flow_handle = in_meta_values->flowHandle;
             ctx->layer_id = layer_id;
             ctx->callout_id = callout_id;
@@ -251,9 +253,9 @@ static void NTAPI _ale_classify(
             NTSTATUS status = FwpsFlowAssociateContext0(ctx->flow_handle, ctx->layer_id, ctx->callout_id, (UINT64)ctx);
             if (NT_SUCCESS(status))
             {
-                KeAcquireSpinLockAtDpcLevel(&tracer->flow_ctx_lock);
+                KIRQL irql = KeAcquireSpinLockRaiseToDpc(&tracer->flow_ctx_lock);
                 InsertTailList(&tracer->flow_ctx_head, &ctx->entry);
-                KeReleaseSpinLockFromDpcLevel(&tracer->flow_ctx_lock);
+                KeReleaseSpinLock(&tracer->flow_ctx_lock, irql);
             }
             else
             {
@@ -266,7 +268,7 @@ static void NTAPI _ale_classify(
 cleanup:
     // This release must stay at the end of the function. This is to guarantee that the last function
     // execution with `UNLOADING = FALSE` is fully done before `driver_unload` proceeds.
-    ExReleaseSpinLockSharedFromDpcLevel(&tracer->unloading_lock);
+    ExReleaseSpinLockShared(&tracer->unloading_lock, old_irql);
 }
 
 static void NTAPI _transport_classify(
@@ -282,7 +284,7 @@ static void NTAPI _transport_classify(
     classify_out->actionType = FWP_ACTION_PERMIT;
 
     WFPTracer *tracer = (WFPTracer *)filter->context;
-    ExAcquireSpinLockSharedAtDpcLevel(&tracer->unloading_lock);
+    KIRQL old_irql = ExAcquireSpinLockShared(&tracer->unloading_lock);
 
     if (!tracer->unloading && flow_context != 0)
     {
@@ -290,14 +292,14 @@ static void NTAPI _transport_classify(
         UINT64 pid = ctx->pid;
         if (pid != 0 && layer_data != NULL)
         {
-            const NET_BUFFER_LIST *data = (const NET_BUFFER_LIST*)layer_data;
+            const NET_BUFFER_LIST *data = (const NET_BUFFER_LIST *)layer_data;
 
             SIZE_T total = 0;
-            for (const NET_BUFFER_LIST* nbl = data; nbl != NULL; nbl = NET_BUFFER_LIST_NEXT_NBL(nbl))
+            for (const NET_BUFFER_LIST *nbl = data; nbl != NULL; nbl = NET_BUFFER_LIST_NEXT_NBL(nbl))
             {
-                for (const NET_BUFFER* nb = NET_BUFFER_LIST_FIRST_NB(nbl); nb != NULL; nb = NET_BUFFER_NEXT_NB(nb))
+                for (const NET_BUFFER *nb = NET_BUFFER_LIST_FIRST_NB(nbl); nb != NULL; nb = NET_BUFFER_NEXT_NB(nb))
                 {
-					total += NET_BUFFER_DATA_LENGTH(nb);
+                    total += NET_BUFFER_DATA_LENGTH(nb);
                 }
             }
 
@@ -306,7 +308,7 @@ static void NTAPI _transport_classify(
     }
 
     // This release must stay at the end of the function. See the note in `_ale_classify`.
-    ExReleaseSpinLockSharedFromDpcLevel(&tracer->unloading_lock);
+    ExReleaseSpinLockShared(&tracer->unloading_lock, old_irql);
 }
 
 static NTSTATUS NTAPI notify(
@@ -327,13 +329,19 @@ static void NTAPI _transport_flow_delete(
 {
     UNREFERENCED_PARAMETER(layer_id);
     UNREFERENCED_PARAMETER(callout_id);
+    LOG("Deleting flow %u %u %u", layer_id, callout_id, flow_context);
 
     if (flow_context != 0)
     {
         FlowContext *ctx = (FlowContext *)flow_context;
 
         KIRQL old_irql = KeAcquireSpinLockRaiseToDpc(&ctx->tracer->flow_ctx_lock);
-        RemoveEntryList(&ctx->entry);
+        if (!ctx->removed)
+        {
+            ctx->removed = TRUE;
+            RemoveEntryList(&ctx->entry);
+        }
+
         KeReleaseSpinLock(&ctx->tracer->flow_ctx_lock, old_irql);
         ExFreePool(ctx);
     }
@@ -406,12 +414,21 @@ void free_wfp_tracer(WFPTracerHandle tracer)
     // At this point, it is guaranteed that no new flow contexts will be created and read.
     // In other words, both `_ale_classify` and `_transport_classify` become no-op functions.
 
-    KeAcquireSpinLock(&tracer->flow_ctx_lock, &old_irql);
+    LOG("All ongoing WFP classify calls are finished");
+    old_irql = KeAcquireSpinLockRaiseToDpc(&tracer->flow_ctx_lock);
 
+    UINT32 counter = 0;
     while (!IsListEmpty(&tracer->flow_ctx_head))
     {
         PLIST_ENTRY node = tracer->flow_ctx_head.Flink;
         FlowContext *ctx = CONTAINING_RECORD(node, FlowContext, entry);
+        LOG("Removing flow context %u", ++counter);
+
+        if (!ctx->removed)
+        {
+            ctx->removed = TRUE;
+            RemoveEntryList(&ctx->entry);
+        }
 
         // Release the spin lock so that `_transport_flow_delete` can acquire it
         KeReleaseSpinLock(&tracer->flow_ctx_lock, old_irql);
@@ -419,7 +436,7 @@ void free_wfp_tracer(WFPTracerHandle tracer)
         // Trigger flow_delete, but DO NOT free memory (i.e. `ExFreePool`) here
         FwpsFlowRemoveContext0(ctx->flow_handle, ctx->layer_id, ctx->callout_id);
 
-        KeAcquireSpinLock(&tracer->flow_ctx_lock, &old_irql);
+        old_irql = KeAcquireSpinLockRaiseToDpc(&tracer->flow_ctx_lock);
     }
 
     // Release to restore IRQL, after this point no one will use the lock anyway
