@@ -173,10 +173,35 @@ static BOOL _unregister_callout(IN OUT WFPTracer *tracer, IN OUT RegisteredCallo
 
     if (callout->fwps_callout_id != 0)
     {
-        ON_NTERROR(
-            FwpsCalloutUnregisterById0(callout->fwps_callout_id),
-            success = FALSE,
-            "Cannot unregister callout");
+        NTSTATUS status = FwpsCalloutUnregisterById0(callout->fwps_callout_id);
+
+        // Note that in extremely rare cases, there may still be outstanding `_transport_flow_delete` calls
+        // of this callout (i.e. not all flow contexts have been removed yet). This can happen when the system
+        // has to unregister a large number of flow contexts during driver unload. Therefore, we implement
+        // a retry mechanism here.
+        if (!NT_SUCCESS(status))
+        {
+            static const int RETRIES = 5;
+            LOG("Cannot call FwpsCalloutUnregisterById0: 0x%08X. Retrying %d more times.", status, RETRIES);
+            success = FALSE;
+
+            LARGE_INTEGER delay = {0};
+            delay.QuadPart = -1000000; // 100 milliseconds
+
+            for (int i = 0; i < RETRIES; i++)
+            {
+                KeDelayExecutionThread(KernelMode, FALSE, &delay);
+                status = FwpsCalloutUnregisterById0(callout->fwps_callout_id);
+                if (NT_SUCCESS(status))
+                {
+                    success = TRUE;
+                    break;
+                }
+
+                LOG("Cannot call FwpsCalloutUnregisterById0: 0x%08X. Retrying %d more time(s).", status, RETRIES - i - 1);
+                success = FALSE;
+            }
+        }
         callout->fwps_callout_id = 0;
     }
 
@@ -311,7 +336,7 @@ static void NTAPI _transport_classify(
     ExReleaseSpinLockShared(&tracer->unloading_lock, old_irql);
 }
 
-static NTSTATUS NTAPI notify(
+static NTSTATUS NTAPI _notify(
     IN FWPS_CALLOUT_NOTIFY_TYPE notify_type,
     IN const GUID *filter_key,
     IN const FWPS_FILTER0 *filter)
@@ -329,7 +354,6 @@ static void NTAPI _transport_flow_delete(
 {
     UNREFERENCED_PARAMETER(layer_id);
     UNREFERENCED_PARAMETER(callout_id);
-    LOG("Deleting flow %u %u %u", layer_id, callout_id, flow_context);
 
     if (flow_context != 0)
     {
@@ -351,56 +375,56 @@ const FWPS_CALLOUT0 INCOMING_ALE_AUTH_V4_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x2f, 0x93}},
     0,
     _ale_classify,
-    notify,
+    _notify,
     NULL};
 
 const FWPS_CALLOUT0 INCOMING_ALE_AUTH_V6_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x2f, 0x94}},
     0,
     _ale_classify,
-    notify,
+    _notify,
     NULL};
 
 const FWPS_CALLOUT0 OUTGOING_ALE_AUTH_V4_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x30, 0x93}},
     0,
     _ale_classify,
-    notify,
+    _notify,
     NULL};
 
 const FWPS_CALLOUT0 OUTGOING_ALE_AUTH_V6_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x30, 0x94}},
     0,
     _ale_classify,
-    notify,
+    _notify,
     NULL};
 
 const FWPS_CALLOUT0 INCOMING_ALE_TRANSPORT_V4_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x95}},
     0,
     _transport_classify,
-    notify,
+    _notify,
     _transport_flow_delete};
 
 const FWPS_CALLOUT0 INCOMING_ALE_TRANSPORT_V6_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x96}},
     0,
     _transport_classify,
-    notify,
+    _notify,
     _transport_flow_delete};
 
 const FWPS_CALLOUT0 OUTGOING_ALE_TRANSPORT_V4_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x71, 0x95}},
     0,
     _transport_classify,
-    notify,
+    _notify,
     _transport_flow_delete};
 
 const FWPS_CALLOUT0 OUTGOING_ALE_TRANSPORT_V6_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x71, 0x96}},
     0,
     _transport_classify,
-    notify,
+    _notify,
     _transport_flow_delete};
 
 void free_wfp_tracer(WFPTracerHandle tracer)
