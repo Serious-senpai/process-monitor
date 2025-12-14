@@ -70,10 +70,14 @@ jobs:
         working-directory: windows-listener
         run: |
           cmd /c "cargo wdk build --profile release --target-arch ${{ matrix.arch }} || exit 0"
-          tree /f
 
           if exist "target\${{ env.CARGO_BUILD_TARGET }}\release\windows_listener.dll" (
+            echo "Found windows_listener.dll"
             if exist "target\${{ env.CARGO_BUILD_TARGET }}\release\windows_listener_driver_package" (
+              echo "Found windows_listener_driver_package"
+
+              mkdir target\release
+              copy "target\${{ env.CARGO_BUILD_TARGET }}\release\windows_listener.dll" "target\release\"
               exit 0
             )
           )
@@ -83,7 +87,10 @@ jobs:
       - name: Build Linux dynamic library
         if: ${{ runner.os == 'Linux' }}
         working-directory: linux-listener
-        run: cargo build --release --target ${{ env.CARGO_BUILD_TARGET }}
+        run: |
+          cargo build --release --target ${{ env.CARGO_BUILD_TARGET }}
+          mkdir target/release
+          cp "target/${{ env.CARGO_BUILD_TARGET }}/release/liblinux_listener.so" "target/release/"
 
       - name: Build user-mode application
         run: |
