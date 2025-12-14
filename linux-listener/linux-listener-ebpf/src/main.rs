@@ -9,16 +9,17 @@ use core::intrinsics;
 use core::ops::Deref;
 use core::panic::PanicInfo;
 
+use aya_ebpf::EbpfContext;
 use aya_ebpf::bindings::{BPF_F_NO_PREALLOC, BPF_NOEXIST};
 use aya_ebpf::helpers::bpf_ktime_get_ns;
 use aya_ebpf::macros::{fexit, kretprobe, map};
 use aya_ebpf::maps::{HashMap, LruHashMap, RingBuf};
 use aya_ebpf::programs::{FExitContext, RetProbeContext};
-use aya_ebpf::EbpfContext;
 use aya_log_ebpf::{debug, warn};
-use ffi::linux::{MAX_PROCESS_COUNT, RING_BUFFER_SIZE};
+use ffi::linux::RING_BUFFER_SIZE;
 use ffi::{
-    Event, EventData, EventType, Metric, NewProcess, StaticCommandName, Threshold, Violation,
+    Event, EventData, EventType, MAX_PROCESS_COUNT, Metric, NewProcess, StaticCommandName,
+    Threshold, Violation,
 };
 
 #[map]

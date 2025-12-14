@@ -40,6 +40,7 @@ typedef struct _FlowContext
 {
     // Entry in the global linked list
     LIST_ENTRY entry;
+    BOOL removed;
 
     // These fields are for `FwpsFlowRemoveContext0`
 
@@ -63,15 +64,16 @@ typedef struct _RegisteredCallout
 typedef struct _WFPTracer
 {
     HANDLE filter_engine;
-    RegisteredCallout ale_v4, ale_v6, tcp_stream_v4, tcp_stream_v6;
+    RegisteredCallout callouts[2][2][2]; // [in/out][v4/v6][auth/transport]
 
     LIST_ENTRY flow_ctx_head;
     KSPIN_LOCK flow_ctx_lock;
 
     BOOL unloading;
     EX_SPIN_LOCK unloading_lock;
+    PDEVICE_OBJECT device;
 
-    void (*callback)(UINT64 pid, SIZE_T size);
+    void (*callback)(PDEVICE_OBJECT device, UINT64 pid, SIZE_T size);
 } WFPTracer;
 
 static NTSTATUS _register_callout(
@@ -171,10 +173,35 @@ static BOOL _unregister_callout(IN OUT WFPTracer *tracer, IN OUT RegisteredCallo
 
     if (callout->fwps_callout_id != 0)
     {
-        ON_NTERROR(
-            FwpsCalloutUnregisterById0(callout->fwps_callout_id),
-            success = FALSE,
-            "Cannot unregister callout");
+        NTSTATUS status = FwpsCalloutUnregisterById0(callout->fwps_callout_id);
+
+        // Note that in extremely rare cases, there may still be outstanding `_transport_flow_delete` calls
+        // of this callout (i.e. not all flow contexts have been removed yet). This can happen when the system
+        // has to unregister a large number of flow contexts during driver unload. Therefore, we implement
+        // a retry mechanism here.
+        if (!NT_SUCCESS(status))
+        {
+            static const int RETRIES = 5;
+            LOG("Cannot call FwpsCalloutUnregisterById0: 0x%08X. Retrying %d more times.", status, RETRIES);
+            success = FALSE;
+
+            LARGE_INTEGER delay = {0};
+            delay.QuadPart = -1000000; // 100 milliseconds
+
+            for (int i = 0; i < RETRIES; i++)
+            {
+                KeDelayExecutionThread(KernelMode, FALSE, &delay);
+                status = FwpsCalloutUnregisterById0(callout->fwps_callout_id);
+                if (NT_SUCCESS(status))
+                {
+                    success = TRUE;
+                    break;
+                }
+
+                LOG("Cannot call FwpsCalloutUnregisterById0: 0x%08X. Retrying %d more time(s).", status, RETRIES - i - 1);
+                success = FALSE;
+            }
+        }
         callout->fwps_callout_id = 0;
     }
 
@@ -193,7 +220,7 @@ static void NTAPI _ale_classify(
     classify_out->actionType = FWP_ACTION_PERMIT;
 
     WFPTracer *tracer = (WFPTracer *)filter->context;
-    ExAcquireSpinLockSharedAtDpcLevel(&tracer->unloading_lock);
+    KIRQL old_irql = ExAcquireSpinLockShared(&tracer->unloading_lock);
 
     if (!tracer->unloading &&
         in_fixed_values != NULL &&
@@ -205,15 +232,26 @@ static void NTAPI _ale_classify(
         UINT64 pid = in_meta_values->processId;
         UINT16 layer_id = 0;
         UINT32 callout_id = 0;
-        if (in_fixed_values->layerId == FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4)
+
+        if (in_fixed_values->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4)
         {
-            layer_id = FWPS_LAYER_STREAM_V4;
-            callout_id = tracer->tcp_stream_v4.fwps_callout_id;
+            layer_id = FWPS_LAYER_OUTBOUND_TRANSPORT_V4;
+            callout_id = tracer->callouts[1][0][0].fwps_callout_id;
         }
-        else if (in_fixed_values->layerId == FWPS_LAYER_ALE_FLOW_ESTABLISHED_V6)
+        else if (in_fixed_values->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6)
         {
-            layer_id = FWPS_LAYER_STREAM_V6;
-            callout_id = tracer->tcp_stream_v6.fwps_callout_id;
+            layer_id = FWPS_LAYER_OUTBOUND_TRANSPORT_V6;
+            callout_id = tracer->callouts[1][1][0].fwps_callout_id;
+        }
+        else if (in_fixed_values->layerId == FWPS_LAYER_ALE_AUTH_RECV_ACCEPT_V4)
+        {
+            layer_id = FWPS_LAYER_INBOUND_TRANSPORT_V4;
+            callout_id = tracer->callouts[0][0][0].fwps_callout_id;
+        }
+        else if (in_fixed_values->layerId == FWPS_LAYER_ALE_AUTH_RECV_ACCEPT_V6)
+        {
+            layer_id = FWPS_LAYER_INBOUND_TRANSPORT_V6;
+            callout_id = tracer->callouts[0][1][0].fwps_callout_id;
         }
         else
         {
@@ -228,6 +266,7 @@ static void NTAPI _ale_classify(
         }
         else
         {
+            ctx->removed = FALSE;
             ctx->flow_handle = in_meta_values->flowHandle;
             ctx->layer_id = layer_id;
             ctx->callout_id = callout_id;
@@ -239,9 +278,9 @@ static void NTAPI _ale_classify(
             NTSTATUS status = FwpsFlowAssociateContext0(ctx->flow_handle, ctx->layer_id, ctx->callout_id, (UINT64)ctx);
             if (NT_SUCCESS(status))
             {
-                KeAcquireSpinLockAtDpcLevel(&tracer->flow_ctx_lock);
+                KIRQL irql = KeAcquireSpinLockRaiseToDpc(&tracer->flow_ctx_lock);
                 InsertTailList(&tracer->flow_ctx_head, &ctx->entry);
-                KeReleaseSpinLockFromDpcLevel(&tracer->flow_ctx_lock);
+                KeReleaseSpinLock(&tracer->flow_ctx_lock, irql);
             }
             else
             {
@@ -254,10 +293,10 @@ static void NTAPI _ale_classify(
 cleanup:
     // This release must stay at the end of the function. This is to guarantee that the last function
     // execution with `UNLOADING = FALSE` is fully done before `driver_unload` proceeds.
-    ExReleaseSpinLockSharedFromDpcLevel(&tracer->unloading_lock);
+    ExReleaseSpinLockShared(&tracer->unloading_lock, old_irql);
 }
 
-static void NTAPI _tcp_stream_classify(
+static void NTAPI _transport_classify(
     IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
     IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
     IN OUT void *layer_data,
@@ -267,11 +306,10 @@ static void NTAPI _tcp_stream_classify(
 {
     UNREFERENCED_PARAMETER(in_fixed_values);
     UNREFERENCED_PARAMETER(in_meta_values);
-    UNREFERENCED_PARAMETER(filter);
     classify_out->actionType = FWP_ACTION_PERMIT;
 
     WFPTracer *tracer = (WFPTracer *)filter->context;
-    ExAcquireSpinLockSharedAtDpcLevel(&tracer->unloading_lock);
+    KIRQL old_irql = ExAcquireSpinLockShared(&tracer->unloading_lock);
 
     if (!tracer->unloading && flow_context != 0)
     {
@@ -279,17 +317,26 @@ static void NTAPI _tcp_stream_classify(
         UINT64 pid = ctx->pid;
         if (pid != 0 && layer_data != NULL)
         {
-            const FWPS_STREAM_CALLOUT_IO_PACKET0 *data = (const FWPS_STREAM_CALLOUT_IO_PACKET0 *)layer_data;
-            const FWPS_STREAM_DATA0 *stream = data->streamData;
-            tracer->callback(pid, stream->dataLength);
+            const NET_BUFFER_LIST *data = (const NET_BUFFER_LIST *)layer_data;
+
+            SIZE_T total = 0;
+            for (const NET_BUFFER_LIST *nbl = data; nbl != NULL; nbl = NET_BUFFER_LIST_NEXT_NBL(nbl))
+            {
+                for (const NET_BUFFER *nb = NET_BUFFER_LIST_FIRST_NB(nbl); nb != NULL; nb = NET_BUFFER_NEXT_NB(nb))
+                {
+                    total += NET_BUFFER_DATA_LENGTH(nb);
+                }
+            }
+
+            tracer->callback(tracer->device, pid, total);
         }
     }
 
     // This release must stay at the end of the function. See the note in `_ale_classify`.
-    ExReleaseSpinLockSharedFromDpcLevel(&tracer->unloading_lock);
+    ExReleaseSpinLockShared(&tracer->unloading_lock, old_irql);
 }
 
-static NTSTATUS NTAPI notify(
+static NTSTATUS NTAPI _notify(
     IN FWPS_CALLOUT_NOTIFY_TYPE notify_type,
     IN const GUID *filter_key,
     IN const FWPS_FILTER0 *filter)
@@ -300,7 +347,7 @@ static NTSTATUS NTAPI notify(
     return STATUS_SUCCESS;
 }
 
-static void NTAPI _tcp_stream_flow_delete(
+static void NTAPI _transport_flow_delete(
     IN UINT16 layer_id,
     IN UINT32 callout_id,
     IN UINT64 flow_context)
@@ -313,41 +360,74 @@ static void NTAPI _tcp_stream_flow_delete(
         FlowContext *ctx = (FlowContext *)flow_context;
 
         KIRQL old_irql = KeAcquireSpinLockRaiseToDpc(&ctx->tracer->flow_ctx_lock);
-        RemoveEntryList(&ctx->entry);
+        if (!ctx->removed)
+        {
+            ctx->removed = TRUE;
+            RemoveEntryList(&ctx->entry);
+        }
+
         KeReleaseSpinLock(&ctx->tracer->flow_ctx_lock, old_irql);
         ExFreePool(ctx);
     }
 }
 
-const FWPS_CALLOUT0 ALE_V4_CALLOUT = {
+const FWPS_CALLOUT0 INCOMING_ALE_AUTH_V4_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x2f, 0x93}},
     0,
     _ale_classify,
-    notify,
+    _notify,
     NULL};
 
-const FWPS_CALLOUT0 ALE_V6_CALLOUT = {
+const FWPS_CALLOUT0 INCOMING_ALE_AUTH_V6_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x2f, 0x94}},
     0,
     _ale_classify,
-    notify,
+    _notify,
     NULL};
 
-const FWPS_CALLOUT0 TCP_STREAM_V4_CALLOUT = {
+const FWPS_CALLOUT0 OUTGOING_ALE_AUTH_V4_CALLOUT = {
+    {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x30, 0x93}},
+    0,
+    _ale_classify,
+    _notify,
+    NULL};
+
+const FWPS_CALLOUT0 OUTGOING_ALE_AUTH_V6_CALLOUT = {
+    {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x30, 0x94}},
+    0,
+    _ale_classify,
+    _notify,
+    NULL};
+
+const FWPS_CALLOUT0 INCOMING_ALE_TRANSPORT_V4_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x95}},
     0,
-    _tcp_stream_classify,
-    notify,
-    _tcp_stream_flow_delete};
+    _transport_classify,
+    _notify,
+    _transport_flow_delete};
 
-const FWPS_CALLOUT0 TCP_STREAM_V6_CALLOUT = {
+const FWPS_CALLOUT0 INCOMING_ALE_TRANSPORT_V6_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x96}},
     0,
-    _tcp_stream_classify,
-    notify,
-    _tcp_stream_flow_delete};
+    _transport_classify,
+    _notify,
+    _transport_flow_delete};
 
-void free_wfp_tracer(WFPTracer *tracer)
+const FWPS_CALLOUT0 OUTGOING_ALE_TRANSPORT_V4_CALLOUT = {
+    {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x71, 0x95}},
+    0,
+    _transport_classify,
+    _notify,
+    _transport_flow_delete};
+
+const FWPS_CALLOUT0 OUTGOING_ALE_TRANSPORT_V6_CALLOUT = {
+    {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x71, 0x96}},
+    0,
+    _transport_classify,
+    _notify,
+    _transport_flow_delete};
+
+void free_wfp_tracer(WFPTracerHandle tracer)
 {
     LOG("Freeing WFP tracer");
 
@@ -356,22 +436,31 @@ void free_wfp_tracer(WFPTracer *tracer)
     ExReleaseSpinLockExclusive(&tracer->unloading_lock, old_irql);
 
     // At this point, it is guaranteed that no new flow contexts will be created and read.
-    // In other words, both `_ale_classify` and `_tcp_stream_classify` become no-op functions.
+    // In other words, both `_ale_classify` and `_transport_classify` become no-op functions.
 
-    KeAcquireSpinLock(&tracer->flow_ctx_lock, &old_irql);
+    LOG("All ongoing WFP classify calls are finished");
+    old_irql = KeAcquireSpinLockRaiseToDpc(&tracer->flow_ctx_lock);
 
+    UINT32 counter = 0;
     while (!IsListEmpty(&tracer->flow_ctx_head))
     {
         PLIST_ENTRY node = tracer->flow_ctx_head.Flink;
         FlowContext *ctx = CONTAINING_RECORD(node, FlowContext, entry);
+        LOG("Removing flow context %u", ++counter);
 
-        // Release the spin lock so that `_tcp_stream_flow_delete` can acquire it
+        if (!ctx->removed)
+        {
+            ctx->removed = TRUE;
+            RemoveEntryList(&ctx->entry);
+        }
+
+        // Release the spin lock so that `_transport_flow_delete` can acquire it
         KeReleaseSpinLock(&tracer->flow_ctx_lock, old_irql);
 
         // Trigger flow_delete, but DO NOT free memory (i.e. `ExFreePool`) here
         FwpsFlowRemoveContext0(ctx->flow_handle, ctx->layer_id, ctx->callout_id);
 
-        KeAcquireSpinLock(&tracer->flow_ctx_lock, &old_irql);
+        old_irql = KeAcquireSpinLockRaiseToDpc(&tracer->flow_ctx_lock);
     }
 
     // Release to restore IRQL, after this point no one will use the lock anyway
@@ -379,24 +468,18 @@ void free_wfp_tracer(WFPTracer *tracer)
 
     if (tracer->filter_engine != NULL)
     {
-        if (!_unregister_callout(tracer, &tracer->ale_v6))
+        for (int i = 0; i < 2; i++)
         {
-            LOG("Failed to unregister ALE_V6 callout");
-        }
-
-        if (!_unregister_callout(tracer, &tracer->ale_v4))
-        {
-            LOG("Failed to unregister ALE_V4 callout");
-        }
-
-        if (!_unregister_callout(tracer, &tracer->tcp_stream_v6))
-        {
-            LOG("Failed to unregister TCP_STREAM_V6 callout");
-        }
-
-        if (!_unregister_callout(tracer, &tracer->tcp_stream_v4))
-        {
-            LOG("Failed to unregister TCP_STREAM_V4 callout");
+            for (int j = 0; j < 2; j++)
+            {
+                for (int k = 0; k < 2; k++)
+                {
+                    if (!_unregister_callout(tracer, &tracer->callouts[i][j][k]))
+                    {
+                        LOG("Failed to unregister callout [%d][%d][%d]", i, j, k);
+                    }
+                }
+            }
         }
 
         INSPECT_DWERROR(
@@ -411,13 +494,14 @@ void free_wfp_tracer(WFPTracer *tracer)
     ExFreePool(tracer);
 }
 
-static void _dummy_callback(UINT64 pid, SIZE_T size)
+static void _dummy_callback(PDEVICE_OBJECT device, UINT64 pid, SIZE_T size)
 {
+    UNREFERENCED_PARAMETER(device);
     UNREFERENCED_PARAMETER(pid);
     UNREFERENCED_PARAMETER(size);
 }
 
-WFPTracer *new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(UINT64 pid, SIZE_T size))
+WFPTracerHandle new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(PDEVICE_OBJECT device, UINT64 pid, SIZE_T size))
 {
     LOG("Initializing new WFP tracer");
     WFPTracer *tracer = ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(WFPTracer), POOL_TAG);
@@ -430,6 +514,7 @@ WFPTracer *new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(UINT64 pid, SI
     RtlZeroMemory(tracer, sizeof(WFPTracer));
     InitializeListHead(&tracer->flow_ctx_head);
     KeInitializeSpinLock(&tracer->flow_ctx_lock);
+    tracer->device = device;
     tracer->callback = (callback == NULL ? _dummy_callback : callback);
 
     DWORD ustatus = FwpmEngineOpen0(NULL, RPC_C_AUTHN_WINNT, NULL, NULL, &tracer->filter_engine);
@@ -456,56 +541,112 @@ WFPTracer *new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(UINT64 pid, SI
 
     NTSTATUS status = _register_callout(
         device,
-        &TCP_STREAM_V4_CALLOUT,
-        &FWPM_LAYER_STREAM_V4,
+        &INCOMING_ALE_TRANSPORT_V4_CALLOUT,
+        &FWPM_LAYER_INBOUND_TRANSPORT_V4,
         &sublayer,
         tracer,
-        &tracer->tcp_stream_v4);
+        &tracer->callouts[0][0][0]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register TCP_STREAM_V4 callout: 0x%08X", status);
+        LOG("Failed to register INCOMING_ALE_TRANSPORT_V4_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }
 
     status = _register_callout(
         device,
-        &TCP_STREAM_V6_CALLOUT,
-        &FWPM_LAYER_STREAM_V6,
+        &INCOMING_ALE_TRANSPORT_V6_CALLOUT,
+        &FWPM_LAYER_INBOUND_TRANSPORT_V6,
         &sublayer,
         tracer,
-        &tracer->tcp_stream_v6);
+        &tracer->callouts[0][1][0]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register TCP_STREAM_V6 callout: 0x%08X", status);
+        LOG("Failed to register INCOMING_ALE_TRANSPORT_V6_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }
 
     status = _register_callout(
         device,
-        &ALE_V4_CALLOUT,
-        &FWPM_LAYER_ALE_FLOW_ESTABLISHED_V4,
+        &OUTGOING_ALE_TRANSPORT_V4_CALLOUT,
+        &FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
         &sublayer,
         tracer,
-        &tracer->ale_v4);
+        &tracer->callouts[1][0][0]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register ALE_V4 callout: 0x%08X", status);
+        LOG("Failed to register OUTGOING_ALE_TRANSPORT_V4_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }
 
     status = _register_callout(
         device,
-        &ALE_V6_CALLOUT,
-        &FWPM_LAYER_ALE_FLOW_ESTABLISHED_V6,
+        &OUTGOING_ALE_TRANSPORT_V6_CALLOUT,
+        &FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
         &sublayer,
         tracer,
-        &tracer->ale_v6);
+        &tracer->callouts[1][1][0]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register ALE_V6 callout: 0x%08X", status);
+        LOG("Failed to register OUTGOING_ALE_TRANSPORT_V6_CALLOUT: 0x%08X", status);
+        free_wfp_tracer(tracer);
+        return NULL;
+    }
+
+    status = _register_callout(
+        device,
+        &INCOMING_ALE_AUTH_V4_CALLOUT,
+        &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+        &sublayer,
+        tracer,
+        &tracer->callouts[0][0][1]);
+    if (!NT_SUCCESS(status))
+    {
+        LOG("Failed to register INCOMING_ALE_AUTH_V4_CALLOUT: 0x%08X", status);
+        free_wfp_tracer(tracer);
+        return NULL;
+    }
+
+    status = _register_callout(
+        device,
+        &INCOMING_ALE_AUTH_V6_CALLOUT,
+        &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+        &sublayer,
+        tracer,
+        &tracer->callouts[0][1][1]);
+    if (!NT_SUCCESS(status))
+    {
+        LOG("Failed to register INCOMING_ALE_AUTH_V6_CALLOUT: 0x%08X", status);
+        free_wfp_tracer(tracer);
+        return NULL;
+    }
+
+    status = _register_callout(
+        device,
+        &OUTGOING_ALE_AUTH_V4_CALLOUT,
+        &FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+        &sublayer,
+        tracer,
+        &tracer->callouts[1][0][1]);
+    if (!NT_SUCCESS(status))
+    {
+        LOG("Failed to register OUTGOING_ALE_AUTH_V4_CALLOUT: 0x%08X", status);
+        free_wfp_tracer(tracer);
+        return NULL;
+    }
+
+    status = _register_callout(
+        device,
+        &OUTGOING_ALE_AUTH_V6_CALLOUT,
+        &FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+        &sublayer,
+        tracer,
+        &tracer->callouts[1][1][1]);
+    if (!NT_SUCCESS(status))
+    {
+        LOG("Failed to register OUTGOING_ALE_AUTH_V6_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }

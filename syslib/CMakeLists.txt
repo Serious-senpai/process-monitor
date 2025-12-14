@@ -3,7 +3,7 @@ project(SystemLibrary LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
-set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_EXTENSIONS ON)  # Enable GNU extensions for SHORT_CIRCUIT macro
 
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}" SYSLIB_ROOT)
 message(STATUS "Got root of syslib: ${SYSLIB_ROOT}")
@@ -28,6 +28,7 @@ target_precompile_headers(SystemLibrary PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${SYS
 
 if(WIN32)
     target_precompile_headers(SystemLibrary PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${SYSLIB_ROOT}/include/win32/pch.hpp>")
+    target_link_libraries(SystemLibrary PUBLIC ws2_32)
 elseif(UNIX)
     target_precompile_headers(SystemLibrary PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${SYSLIB_ROOT}/include/linux/pch.hpp>")
 endif()
