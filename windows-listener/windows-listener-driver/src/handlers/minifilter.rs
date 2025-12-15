@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloc::string::ToString;
 use core::ffi::{CStr, c_void};
 use core::ptr;
@@ -9,15 +10,42 @@ use wdk_sys::ntddk::{KeQueryPerformanceCounter, PsGetProcessId};
 use wdk_sys::{IRP_MJ_READ, IRP_MJ_WRITE, PEPROCESS};
 use windows::Wdk::Storage::FileSystem::Minifilters::{
     FLT_CALLBACK_DATA, FLT_OPERATION_REGISTRATION, FLT_POSTOP_CALLBACK_STATUS,
-    FLT_POSTOP_FINISHED_PROCESSING, FLT_REGISTRATION, FLT_REGISTRATION_VERSION,
-    FLT_RELATED_OBJECTS, FltGetRequestorProcess, FltUnregisterFilter, IRP_MJ_OPERATION_END,
-    PFLT_FILTER,
+    FLT_POSTOP_FINISHED_PROCESSING, FLT_POSTOP_MORE_PROCESSING_REQUIRED, FLT_REGISTRATION,
+    FLT_REGISTRATION_VERSION, FLT_RELATED_OBJECTS, FltDoCompletionProcessingWhenSafe,
+    FltGetRequestorProcess, FltUnregisterFilter, IRP_MJ_OPERATION_END, PFLT_FILTER,
 };
 use windows::Win32::Foundation::{NTSTATUS, STATUS_SUCCESS};
 
 use crate::log;
 use crate::state::DRIVER_STATE;
 use crate::wrappers::bindings::PsGetProcessImageFileName;
+
+unsafe extern "system" fn _minifilter_safe_postop(
+    _: *mut FLT_CALLBACK_DATA,
+    _: *const FLT_RELATED_OBJECTS,
+    context: *const c_void,
+    _: u32,
+) -> FLT_POSTOP_CALLBACK_STATUS {
+    let event = unsafe { Box::from_raw(context as *mut WindowsEvent) };
+    let shared_memory = DRIVER_STATE.shared_memory.load(Ordering::Acquire);
+
+    if let Some(shared_memory) = unsafe { shared_memory.as_ref() } {
+        match postcard::to_allocvec_cobs(&event) {
+            Ok(data) => {
+                if let Err(e) = shared_memory.queue.send(&data) {
+                    log!("Failed to write data to shared memory queue: {e}");
+                } else {
+                    shared_memory.event.set();
+                }
+            }
+            Err(e) => {
+                log!("Failed to serialize {:?}: {e}", event);
+            }
+        }
+    }
+
+    FLT_POSTOP_FINISHED_PROCESSING
+}
 
 pub const FILTER_REGISTRATION: FLT_REGISTRATION = FLT_REGISTRATION {
     Size: size_of::<FLT_REGISTRATION>() as _,
@@ -64,17 +92,15 @@ const _FILTER_CALLBACKS: [FLT_OPERATION_REGISTRATION; 3] = [
 
 unsafe extern "system" fn _minifilter_postop(
     data: *mut FLT_CALLBACK_DATA,
-    _: *const FLT_RELATED_OBJECTS,
+    flt_objects: *const FLT_RELATED_OBJECTS,
     _: *const c_void,
     _: u32,
 ) -> FLT_POSTOP_CALLBACK_STATUS {
     let thresholds = DRIVER_STATE.thresholds.load(Ordering::Acquire);
-    let shared_memory = DRIVER_STATE.shared_memory.load(Ordering::Acquire);
     let ticks_per_ms = DRIVER_STATE.ticks_per_ms.load(Ordering::Acquire);
     let disk_io = DRIVER_STATE.disk_io.load(Ordering::Acquire);
 
     if let Some(thresholds) = unsafe { thresholds.as_ref() }
-        && let Some(shared_memory) = unsafe { shared_memory.as_ref() }
         && ticks_per_ms > 0
         && let Some(disk_io) = unsafe { disk_io.as_ref() }
     {
@@ -122,7 +148,7 @@ unsafe extern "system" fn _minifilter_postop(
 
                             let rate = 1000 * accumulated / u128::from(dt);
                             if rate >= u128::from(threshold) {
-                                let event = WindowsEvent {
+                                let context = Box::new(WindowsEvent {
                                     pid,
                                     name: name.to_string(),
                                     data: WindowsEventData::Violation(Violation {
@@ -130,21 +156,24 @@ unsafe extern "system" fn _minifilter_postop(
                                         value: rate as u32,
                                         threshold,
                                     }),
+                                });
+
+                                let mut status = FLT_POSTOP_FINISHED_PROCESSING;
+                                let synchronous = unsafe {
+                                    FltDoCompletionProcessingWhenSafe(
+                                        data,
+                                        flt_objects,
+                                        Some(Box::into_raw(context) as *const c_void),
+                                        0,
+                                        Some(_minifilter_safe_postop),
+                                        &mut status,
+                                    )
                                 };
 
-                                match postcard::to_allocvec_cobs(&event) {
-                                    Ok(data) => {
-                                        if let Err(e) = shared_memory.queue.send(&data) {
-                                            log!(
-                                                "Failed to write data to shared memory queue: {e}"
-                                            );
-                                        } else {
-                                            shared_memory.event.set();
-                                        }
-                                    }
-                                    Err(e) => {
-                                        log!("Failed to serialize {event:?}: {e}");
-                                    }
+                                if synchronous {
+                                    return status;
+                                } else {
+                                    return FLT_POSTOP_MORE_PROCESSING_REQUIRED;
                                 }
                             }
                         }

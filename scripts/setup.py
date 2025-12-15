@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Setup script for development environment
+# Setup script for VSCode development environment (both Windows and Linux)
 
 from __future__ import annotations
 

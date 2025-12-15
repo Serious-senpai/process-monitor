@@ -1,4 +1,5 @@
 @echo off
+:: Driver installation script for Windows VM
 
 for %%f in ("%~dp0") do set root=%%~ff
 

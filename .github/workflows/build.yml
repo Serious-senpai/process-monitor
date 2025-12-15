@@ -89,7 +89,7 @@ jobs:
         working-directory: linux-listener
         run: |
           cargo build --release --target ${{ env.CARGO_BUILD_TARGET }}
-          mkdir target/release
+          mkdir -p target/release
           cp "target/${{ env.CARGO_BUILD_TARGET }}/release/liblinux_listener.so" "target/release/"
 
       - name: Build user-mode application
