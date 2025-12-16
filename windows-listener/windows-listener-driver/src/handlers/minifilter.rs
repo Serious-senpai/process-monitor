@@ -5,13 +5,12 @@ use core::sync::atomic::Ordering;
 
 use ffi::win32::event::{WindowsEvent, WindowsEventData};
 use ffi::{Metric, StaticCommandName, Violation};
-use wdk_sys::ntddk::{KeBugCheck, KeQueryPerformanceCounter, PsGetProcessId};
-use wdk_sys::{APC_LEVEL, IRP_MJ_READ, IRP_MJ_WRITE, PEPROCESS};
+use wdk_sys::ntddk::{KeQueryPerformanceCounter, PsGetProcessId};
+use wdk_sys::{IRP_MJ_READ, IRP_MJ_WRITE, PEPROCESS};
 use windows::Wdk::Storage::FileSystem::Minifilters::{
     FLT_CALLBACK_DATA, FLT_OPERATION_REGISTRATION, FLT_POSTOP_CALLBACK_STATUS,
-    FLT_POSTOP_FINISHED_PROCESSING, FLT_PREOP_CALLBACK_STATUS, FLT_PREOP_SUCCESS_WITH_CALLBACK,
-    FLT_PREOP_SYNCHRONIZE, FLT_REGISTRATION, FLT_REGISTRATION_VERSION, FLT_RELATED_OBJECTS,
-    FltGetRequestorProcess, FltIsOperationSynchronous, FltUnregisterFilter, IRP_MJ_OPERATION_END,
+    FLT_POSTOP_FINISHED_PROCESSING, FLT_REGISTRATION, FLT_REGISTRATION_VERSION,
+    FLT_RELATED_OBJECTS, FltGetRequestorProcess, FltUnregisterFilter, IRP_MJ_OPERATION_END,
     PFLT_FILTER,
 };
 use windows::Win32::Foundation::{NTSTATUS, STATUS_SUCCESS};
@@ -19,7 +18,6 @@ use windows::Win32::Foundation::{NTSTATUS, STATUS_SUCCESS};
 use crate::log;
 use crate::state::DRIVER_STATE;
 use crate::wrappers::bindings::PsGetProcessImageFileName;
-use crate::wrappers::irql::irql_requires;
 
 pub const FILTER_REGISTRATION: FLT_REGISTRATION = FLT_REGISTRATION {
     Size: size_of::<FLT_REGISTRATION>() as _,
@@ -44,14 +42,14 @@ const _FILTER_CALLBACKS: [FLT_OPERATION_REGISTRATION; 3] = [
     FLT_OPERATION_REGISTRATION {
         MajorFunction: IRP_MJ_READ as _,
         Flags: 0,
-        PreOperation: Some(_minifilter_preop),
+        PreOperation: None,
         PostOperation: Some(_minifilter_postop),
         Reserved1: ptr::null_mut(),
     },
     FLT_OPERATION_REGISTRATION {
         MajorFunction: IRP_MJ_WRITE as _,
         Flags: 0,
-        PreOperation: Some(_minifilter_preop),
+        PreOperation: None,
         PostOperation: Some(_minifilter_postop),
         Reserved1: ptr::null_mut(),
     },
@@ -64,31 +62,12 @@ const _FILTER_CALLBACKS: [FLT_OPERATION_REGISTRATION; 3] = [
     },
 ];
 
-unsafe extern "system" fn _minifilter_preop(
-    data: *mut FLT_CALLBACK_DATA,
-    _: *const FLT_RELATED_OBJECTS,
-    _: *mut *mut c_void,
-) -> FLT_PREOP_CALLBACK_STATUS {
-    if unsafe { FltIsOperationSynchronous(data) } {
-        FLT_PREOP_SYNCHRONIZE
-    } else {
-        FLT_PREOP_SUCCESS_WITH_CALLBACK
-    }
-}
-
 unsafe extern "system" fn _minifilter_postop(
     data: *mut FLT_CALLBACK_DATA,
     _: *const FLT_RELATED_OBJECTS,
     _: *const c_void,
     _: u32,
 ) -> FLT_POSTOP_CALLBACK_STATUS {
-    if irql_requires(APC_LEVEL).is_err() {
-        unsafe {
-            // https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-0xa--irql-not-less-or-equal
-            KeBugCheck(0x0000000A);
-        }
-    }
-
     let thresholds = DRIVER_STATE.thresholds.load(Ordering::Acquire);
     let ticks_per_ms = DRIVER_STATE.ticks_per_ms.load(Ordering::Acquire);
     let disk_io = DRIVER_STATE.disk_io.load(Ordering::Acquire);

@@ -9,6 +9,7 @@ pub enum RuntimeError {
     Failure(NTSTATUS),
     InvalidIRQL(KIRQL),
     ConversionError(TryFromIntError),
+    Custom(&'static str),
 }
 
 impl fmt::Display for RuntimeError {
@@ -17,6 +18,7 @@ impl fmt::Display for RuntimeError {
             Self::Failure(status) => write!(f, "Operation failed with status {status}"),
             Self::InvalidIRQL(irql) => write!(f, "Invalid IRQL {irql}"),
             Self::ConversionError(error) => write!(f, "Conversion error: {error}"),
+            Self::Custom(message) => write!(f, "{message}"),
         }
     }
 }

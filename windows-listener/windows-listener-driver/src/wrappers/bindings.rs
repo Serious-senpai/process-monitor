@@ -1,6 +1,13 @@
-use core::ffi::c_char;
+use core::ffi::{c_char, c_void};
+use core::ptr;
 
-use wdk_sys::{PEPROCESS, PIO_STACK_LOCATION, PIRP};
+use wdk_sys::_MEMORY_CACHING_TYPE::MmCached;
+use wdk_sys::_MODE::KernelMode;
+use wdk_sys::ntddk::MmMapLockedPagesSpecifyCache;
+use wdk_sys::{
+    MDL, MDL_MAPPED_TO_SYSTEM_VA, MDL_SOURCE_IS_NONPAGED_POOL, PEPROCESS, PIO_STACK_LOCATION, PIRP,
+    ULONG,
+};
 
 unsafe extern "C" {
     /// See also: https://blog.csdn.net/fearhacker/article/details/152052624 (Chinese)
@@ -19,5 +26,24 @@ pub unsafe fn IoGetCurrentIrpStackLocation(irp: PIRP) -> PIO_STACK_LOCATION {
             .__bindgen_anon_2
             .__bindgen_anon_1
             .CurrentStackLocation
+    }
+}
+
+#[allow(non_snake_case)]
+/// Binding to [`MmGetSystemAddressForMdlSafe`](https://codemachine.com/downloads/win71/wdm.h)
+pub unsafe fn MmGetSystemAddressForMdlSafe(mdl: *mut MDL, priority: ULONG) -> *mut c_void {
+    unsafe {
+        if (*mdl).MdlFlags as u32 & (MDL_MAPPED_TO_SYSTEM_VA | MDL_SOURCE_IS_NONPAGED_POOL) != 0 {
+            (*mdl).MappedSystemVa
+        } else {
+            MmMapLockedPagesSpecifyCache(
+                mdl,
+                KernelMode as _,
+                MmCached,
+                ptr::null_mut(),
+                0,
+                priority,
+            )
+        }
     }
 }
