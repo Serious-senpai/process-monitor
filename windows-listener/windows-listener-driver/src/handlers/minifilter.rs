@@ -10,9 +10,9 @@ use wdk_sys::ntddk::{KeQueryPerformanceCounter, PsGetProcessId};
 use wdk_sys::{IRP_MJ_READ, IRP_MJ_WRITE, IRP_PAGING_IO, PEPROCESS};
 use windows::Wdk::Storage::FileSystem::Minifilters::{
     FLT_CALLBACK_DATA, FLT_OPERATION_REGISTRATION, FLT_POSTOP_CALLBACK_STATUS,
-    FLT_POSTOP_FINISHED_PROCESSING, FLT_POSTOP_MORE_PROCESSING_REQUIRED, FLT_REGISTRATION,
-    FLT_REGISTRATION_VERSION, FLT_RELATED_OBJECTS, FltDoCompletionProcessingWhenSafe,
-    FltGetRequestorProcess, FltUnregisterFilter, IRP_MJ_OPERATION_END, PFLT_FILTER,
+    FLT_POSTOP_FINISHED_PROCESSING, FLT_REGISTRATION, FLT_REGISTRATION_VERSION,
+    FLT_RELATED_OBJECTS, FltDoCompletionProcessingWhenSafe, FltGetRequestorProcess,
+    FltUnregisterFilter, IRP_MJ_OPERATION_END, PFLT_FILTER,
 };
 use windows::Win32::Foundation::{NTSTATUS, STATUS_SUCCESS};
 

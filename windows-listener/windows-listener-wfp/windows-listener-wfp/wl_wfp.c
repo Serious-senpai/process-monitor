@@ -64,7 +64,7 @@ typedef struct _RegisteredCallout
 typedef struct _WFPTracer
 {
     HANDLE filter_engine;
-    RegisteredCallout callouts[2][2][2]; // [in/out][v4/v6][auth/transport]
+    RegisteredCallout ale[2], tcp[2], udp[2];
 
     LIST_ENTRY flow_ctx_head;
     KSPIN_LOCK flow_ctx_lock;
@@ -175,7 +175,7 @@ static BOOL _unregister_callout(IN OUT WFPTracer *tracer, IN OUT RegisteredCallo
     {
         NTSTATUS status = FwpsCalloutUnregisterById0(callout->fwps_callout_id);
 
-        // Note that in extremely rare cases, there may still be outstanding `_transport_flow_delete` calls
+        // Note that in extremely rare cases, there may still be outstanding `_flow_delete` calls
         // of this callout (i.e. not all flow contexts have been removed yet). This can happen when the system
         // has to unregister a large number of flow contexts during driver unload. Therefore, we implement
         // a retry mechanism here.
@@ -230,34 +230,43 @@ static void NTAPI _ale_classify(
         flow_context == 0)
     {
         UINT64 pid = in_meta_values->processId;
-        UINT16 layer_id = 0;
-        UINT32 callout_id = 0;
 
-        if (in_fixed_values->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4)
+        SIZE_T offset = 0;
+        UINT8 protocol = 0;
+        if (in_fixed_values->layerId == FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4)
         {
-            layer_id = FWPS_LAYER_OUTBOUND_TRANSPORT_V4;
-            callout_id = tracer->callouts[1][0][0].fwps_callout_id;
+            offset = 0;
+            protocol = in_fixed_values->incomingValue[FWPS_FIELD_ALE_FLOW_ESTABLISHED_V4_IP_PROTOCOL].value.uint8;
         }
-        else if (in_fixed_values->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6)
+        else if (in_fixed_values->layerId == FWPS_LAYER_ALE_FLOW_ESTABLISHED_V6)
         {
-            layer_id = FWPS_LAYER_OUTBOUND_TRANSPORT_V6;
-            callout_id = tracer->callouts[1][1][0].fwps_callout_id;
-        }
-        else if (in_fixed_values->layerId == FWPS_LAYER_ALE_AUTH_RECV_ACCEPT_V4)
-        {
-            layer_id = FWPS_LAYER_INBOUND_TRANSPORT_V4;
-            callout_id = tracer->callouts[0][0][0].fwps_callout_id;
-        }
-        else if (in_fixed_values->layerId == FWPS_LAYER_ALE_AUTH_RECV_ACCEPT_V6)
-        {
-            layer_id = FWPS_LAYER_INBOUND_TRANSPORT_V6;
-            callout_id = tracer->callouts[0][1][0].fwps_callout_id;
+            offset = 1;
+            protocol = in_fixed_values->incomingValue[FWPS_FIELD_ALE_FLOW_ESTABLISHED_V6_IP_PROTOCOL].value.uint8;
         }
         else
         {
+            // FIXME: Issue a bugcheck? This should never happen anyway.
             LOG("Warning: _ale_classify called on unsupported layer ID %u", in_fixed_values->layerId);
             goto cleanup;
         }
+
+        UINT16 layer_id = 0;
+        RegisteredCallout *next = NULL;
+        if (protocol == IPPROTO_TCP)
+        {
+            layer_id = (offset == 0 ? FWPS_LAYER_STREAM_V4 : FWPS_LAYER_STREAM_V6);
+            next = tracer->tcp;
+        }
+        else
+        {
+            // Should we check `if (protocol == IPPROTO_UDP)` here?
+            // According to https://learn.microsoft.com/en-us/windows/win32/fwp/udp-packet-flows:
+            // > All non-TCP packet flows follow the same pattern as UDP packet flows.
+            layer_id = (offset == 0 ? FWPS_LAYER_DATAGRAM_DATA_V4 : FWPS_LAYER_DATAGRAM_DATA_V6);
+            next = tracer->udp;
+        }
+
+        next += offset;
 
         FlowContext *ctx = (FlowContext *)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(FlowContext), POOL_TAG);
         if (ctx == NULL)
@@ -269,7 +278,7 @@ static void NTAPI _ale_classify(
             ctx->removed = FALSE;
             ctx->flow_handle = in_meta_values->flowHandle;
             ctx->layer_id = layer_id;
-            ctx->callout_id = callout_id;
+            ctx->callout_id = next->fwps_callout_id;
             ctx->tracer = tracer;
             ctx->pid = pid;
 
@@ -296,7 +305,39 @@ cleanup:
     ExReleaseSpinLockShared(&tracer->unloading_lock, old_irql);
 }
 
-static void NTAPI _transport_classify(
+static void NTAPI _tcp_classify(
+    IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
+    IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
+    IN OUT void *layer_data,
+    IN const FWPS_FILTER0 *filter,
+    IN UINT64 flow_context,
+    IN OUT FWPS_CLASSIFY_OUT0 *classify_out)
+{
+    UNREFERENCED_PARAMETER(in_fixed_values);
+    UNREFERENCED_PARAMETER(in_meta_values);
+    UNREFERENCED_PARAMETER(filter);
+    classify_out->actionType = FWP_ACTION_PERMIT;
+
+    WFPTracer *tracer = (WFPTracer *)filter->context;
+    ExAcquireSpinLockSharedAtDpcLevel(&tracer->unloading_lock);
+
+    if (!tracer->unloading && flow_context != 0)
+    {
+        FlowContext *ctx = (FlowContext *)flow_context;
+        UINT64 pid = ctx->pid;
+        if (pid != 0 && layer_data != NULL)
+        {
+            const FWPS_STREAM_CALLOUT_IO_PACKET0 *data = (const FWPS_STREAM_CALLOUT_IO_PACKET0 *)layer_data;
+            const FWPS_STREAM_DATA0 *stream = data->streamData;
+            tracer->callback(tracer->device, pid, stream->dataLength);
+        }
+    }
+
+    // This release must stay at the end of the function. See the note in `_ale_classify`.
+    ExReleaseSpinLockSharedFromDpcLevel(&tracer->unloading_lock);
+}
+
+static void NTAPI _udp_classify(
     IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
     IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
     IN OUT void *layer_data,
@@ -347,7 +388,7 @@ static NTSTATUS NTAPI _notify(
     return STATUS_SUCCESS;
 }
 
-static void NTAPI _transport_flow_delete(
+static void NTAPI _flow_delete(
     IN UINT16 layer_id,
     IN UINT32 callout_id,
     IN UINT64 flow_context)
@@ -371,64 +412,55 @@ static void NTAPI _transport_flow_delete(
     }
 }
 
-const FWPS_CALLOUT0 INCOMING_ALE_AUTH_V4_CALLOUT = {
+const FWPS_CALLOUT0 ALE_FLOW_ESTABLISHED_V4_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x2f, 0x93}},
     0,
     _ale_classify,
     _notify,
     NULL};
 
-const FWPS_CALLOUT0 INCOMING_ALE_AUTH_V6_CALLOUT = {
+const FWPS_CALLOUT0 ALE_FLOW_ESTABLISHED_V6_CALLOUT = {
     {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x2f, 0x94}},
     0,
     _ale_classify,
     _notify,
     NULL};
 
-const FWPS_CALLOUT0 OUTGOING_ALE_AUTH_V4_CALLOUT = {
-    {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x30, 0x93}},
-    0,
-    _ale_classify,
-    _notify,
-    NULL};
-
-const FWPS_CALLOUT0 OUTGOING_ALE_AUTH_V6_CALLOUT = {
-    {0xda4d8b9a, 0x7d13, 0x4c89, {0x9b, 0x3c, 0xb4, 0x44, 0x73, 0x18, 0x30, 0x94}},
-    0,
-    _ale_classify,
-    _notify,
-    NULL};
-
-const FWPS_CALLOUT0 INCOMING_ALE_TRANSPORT_V4_CALLOUT = {
+const FWPS_CALLOUT0 STREAM_V4_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x95}},
     0,
-    _transport_classify,
+    _tcp_classify,
     _notify,
-    _transport_flow_delete};
+    _flow_delete};
 
-const FWPS_CALLOUT0 INCOMING_ALE_TRANSPORT_V6_CALLOUT = {
+const FWPS_CALLOUT0 STREAM_V6_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x70, 0x96}},
     0,
-    _transport_classify,
+    _tcp_classify,
     _notify,
-    _transport_flow_delete};
+    _flow_delete};
 
-const FWPS_CALLOUT0 OUTGOING_ALE_TRANSPORT_V4_CALLOUT = {
+const FWPS_CALLOUT0 DATAGRAM_DATA_V4_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x71, 0x95}},
     0,
-    _transport_classify,
+    _udp_classify,
     _notify,
-    _transport_flow_delete};
+    _flow_delete};
 
-const FWPS_CALLOUT0 OUTGOING_ALE_TRANSPORT_V6_CALLOUT = {
+const FWPS_CALLOUT0 DATAGRAM_DATA_V6_CALLOUT = {
     {0x37d2ded2, 0xce93, 0x4e2a, {0xb6, 0x77, 0xd8, 0x0c, 0x73, 0x4f, 0x71, 0x96}},
     0,
-    _transport_classify,
+    _udp_classify,
     _notify,
-    _transport_flow_delete};
+    _flow_delete};
 
 void free_wfp_tracer(WFPTracerHandle tracer)
 {
+    if (tracer == NULL)
+    {
+        return;
+    }
+
     LOG("Freeing WFP tracer");
 
     KIRQL old_irql = ExAcquireSpinLockExclusive(&tracer->unloading_lock);
@@ -468,15 +500,17 @@ void free_wfp_tracer(WFPTracerHandle tracer)
     {
         for (int i = 0; i < 2; i++)
         {
-            for (int j = 0; j < 2; j++)
+            if (!_unregister_callout(tracer, &tracer->ale[i]))
             {
-                for (int k = 0; k < 2; k++)
-                {
-                    if (!_unregister_callout(tracer, &tracer->callouts[i][j][k]))
-                    {
-                        LOG("Failed to unregister callout [%d][%d][%d]", i, j, k);
-                    }
-                }
+                LOG("Failed to unregister ale[%d]", i);
+            }
+            if (!_unregister_callout(tracer, &tracer->tcp[i]))
+            {
+                LOG("Failed to unregister tcp[%d]", i);
+            }
+            if (!_unregister_callout(tracer, &tracer->udp[i]))
+            {
+                LOG("Failed to unregister udp[%d]", i);
             }
         }
 
@@ -539,112 +573,84 @@ WFPTracerHandle new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(PDEVICE_O
 
     NTSTATUS status = _register_callout(
         device,
-        &INCOMING_ALE_TRANSPORT_V4_CALLOUT,
-        &FWPM_LAYER_INBOUND_TRANSPORT_V4,
+        &DATAGRAM_DATA_V4_CALLOUT,
+        &FWPM_LAYER_DATAGRAM_DATA_V4,
         &sublayer,
         tracer,
-        &tracer->callouts[0][0][0]);
+        &tracer->udp[0]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register INCOMING_ALE_TRANSPORT_V4_CALLOUT: 0x%08X", status);
+        LOG("Failed to register DATAGRAM_DATA_V4_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }
 
     status = _register_callout(
         device,
-        &INCOMING_ALE_TRANSPORT_V6_CALLOUT,
-        &FWPM_LAYER_INBOUND_TRANSPORT_V6,
+        &DATAGRAM_DATA_V6_CALLOUT,
+        &FWPM_LAYER_DATAGRAM_DATA_V6,
         &sublayer,
         tracer,
-        &tracer->callouts[0][1][0]);
+        &tracer->udp[1]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register INCOMING_ALE_TRANSPORT_V6_CALLOUT: 0x%08X", status);
+        LOG("Failed to register DATAGRAM_DATA_V6_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }
 
     status = _register_callout(
         device,
-        &OUTGOING_ALE_TRANSPORT_V4_CALLOUT,
-        &FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+        &STREAM_V4_CALLOUT,
+        &FWPM_LAYER_STREAM_V4,
         &sublayer,
         tracer,
-        &tracer->callouts[1][0][0]);
+        &tracer->tcp[0]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register OUTGOING_ALE_TRANSPORT_V4_CALLOUT: 0x%08X", status);
+        LOG("Failed to register STREAM_V4_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }
 
     status = _register_callout(
         device,
-        &OUTGOING_ALE_TRANSPORT_V6_CALLOUT,
-        &FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
+        &STREAM_V6_CALLOUT,
+        &FWPM_LAYER_STREAM_V6,
         &sublayer,
         tracer,
-        &tracer->callouts[1][1][0]);
+        &tracer->tcp[1]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register OUTGOING_ALE_TRANSPORT_V6_CALLOUT: 0x%08X", status);
+        LOG("Failed to register STREAM_V6_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }
 
     status = _register_callout(
         device,
-        &INCOMING_ALE_AUTH_V4_CALLOUT,
-        &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+        &ALE_FLOW_ESTABLISHED_V4_CALLOUT,
+        &FWPM_LAYER_ALE_FLOW_ESTABLISHED_V4,
         &sublayer,
         tracer,
-        &tracer->callouts[0][0][1]);
+        &tracer->ale[0]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register INCOMING_ALE_AUTH_V4_CALLOUT: 0x%08X", status);
+        LOG("Failed to register ALE_FLOW_ESTABLISHED_V4_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }
 
     status = _register_callout(
         device,
-        &INCOMING_ALE_AUTH_V6_CALLOUT,
-        &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+        &ALE_FLOW_ESTABLISHED_V6_CALLOUT,
+        &FWPM_LAYER_ALE_FLOW_ESTABLISHED_V6,
         &sublayer,
         tracer,
-        &tracer->callouts[0][1][1]);
+        &tracer->ale[1]);
     if (!NT_SUCCESS(status))
     {
-        LOG("Failed to register INCOMING_ALE_AUTH_V6_CALLOUT: 0x%08X", status);
-        free_wfp_tracer(tracer);
-        return NULL;
-    }
-
-    status = _register_callout(
-        device,
-        &OUTGOING_ALE_AUTH_V4_CALLOUT,
-        &FWPM_LAYER_ALE_AUTH_CONNECT_V4,
-        &sublayer,
-        tracer,
-        &tracer->callouts[1][0][1]);
-    if (!NT_SUCCESS(status))
-    {
-        LOG("Failed to register OUTGOING_ALE_AUTH_V4_CALLOUT: 0x%08X", status);
-        free_wfp_tracer(tracer);
-        return NULL;
-    }
-
-    status = _register_callout(
-        device,
-        &OUTGOING_ALE_AUTH_V6_CALLOUT,
-        &FWPM_LAYER_ALE_AUTH_CONNECT_V6,
-        &sublayer,
-        tracer,
-        &tracer->callouts[1][1][1]);
-    if (!NT_SUCCESS(status))
-    {
-        LOG("Failed to register OUTGOING_ALE_AUTH_V6_CALLOUT: 0x%08X", status);
+        LOG("Failed to register ALE_FLOW_ESTABLISHED_V6_CALLOUT: 0x%08X", status);
         free_wfp_tracer(tracer);
         return NULL;
     }
