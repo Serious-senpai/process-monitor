@@ -441,12 +441,10 @@ void free_wfp_tracer(WFPTracerHandle tracer)
     LOG("All ongoing WFP classify calls are finished");
     old_irql = KeAcquireSpinLockRaiseToDpc(&tracer->flow_ctx_lock);
 
-    UINT32 counter = 0;
     while (!IsListEmpty(&tracer->flow_ctx_head))
     {
         PLIST_ENTRY node = tracer->flow_ctx_head.Flink;
         FlowContext *ctx = CONTAINING_RECORD(node, FlowContext, entry);
-        LOG("Removing flow context %u", ++counter);
 
         if (!ctx->removed)
         {

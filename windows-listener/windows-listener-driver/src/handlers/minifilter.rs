@@ -7,7 +7,7 @@ use core::sync::atomic::Ordering;
 use ffi::win32::event::{WindowsEvent, WindowsEventData};
 use ffi::{Metric, StaticCommandName, Violation};
 use wdk_sys::ntddk::{KeQueryPerformanceCounter, PsGetProcessId};
-use wdk_sys::{IRP_MJ_READ, IRP_MJ_WRITE, PEPROCESS};
+use wdk_sys::{IRP_MJ_READ, IRP_MJ_WRITE, IRP_PAGING_IO, PEPROCESS};
 use windows::Wdk::Storage::FileSystem::Minifilters::{
     FLT_CALLBACK_DATA, FLT_OPERATION_REGISTRATION, FLT_POSTOP_CALLBACK_STATUS,
     FLT_POSTOP_FINISHED_PROCESSING, FLT_POSTOP_MORE_PROCESSING_REQUIRED, FLT_REGISTRATION,
@@ -103,6 +103,9 @@ unsafe extern "system" fn _minifilter_postop(
     if let Some(thresholds) = unsafe { thresholds.as_ref() }
         && ticks_per_ms > 0
         && let Some(disk_io) = unsafe { disk_io.as_ref() }
+        && let Some(data) = unsafe { data.as_mut() }
+        && let Some(io) = unsafe { data.Iopb.as_ref() }
+        && io.IrpFlags & IRP_PAGING_IO == 0
     {
         let process = unsafe { FltGetRequestorProcess(data) }.0 as PEPROCESS;
 
@@ -119,16 +122,10 @@ unsafe extern "system" fn _minifilter_postop(
                 let timestamp_ms = (unsafe { KeQueryPerformanceCounter(ptr::null_mut()).QuadPart }
                     / ticks_per_ms) as u64;
 
-                let size = if let Some(data) = unsafe { data.as_mut() }
-                    && let Some(io) = unsafe { data.Iopb.as_ref() }
-                {
-                    match io.MajorFunction.into() {
-                        IRP_MJ_READ => unsafe { io.Parameters.Read.Length },
-                        IRP_MJ_WRITE => unsafe { io.Parameters.Write.Length },
-                        _ => 0,
-                    }
-                } else {
-                    0
+                let size = match io.MajorFunction.into() {
+                    IRP_MJ_READ => unsafe { io.Parameters.Read.Length },
+                    IRP_MJ_WRITE => unsafe { io.Parameters.Write.Length },
+                    _ => 0,
                 };
 
                 let mut disk_io = disk_io.acquire();
@@ -170,11 +167,15 @@ unsafe extern "system" fn _minifilter_postop(
                                     )
                                 };
 
-                                if synchronous {
-                                    return status;
-                                } else {
-                                    return FLT_POSTOP_MORE_PROCESSING_REQUIRED;
+                                if !synchronous && status == FLT_POSTOP_FINISHED_PROCESSING {
+                                    // The I/O operation cannot be safely posted to the worker thread at IRQL >= DISPATCH_LEVEL.
+                                    // In other words, we are unable to execute `_minifilter_safe_postop` at all.
+                                    log!(
+                                        "Warning: Unable to notify disk I/O violation - FltDoCompletionProcessingWhenSafe failed"
+                                    );
                                 }
+
+                                return status;
                             }
                         }
                     }
