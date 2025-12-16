@@ -1,60 +1,21 @@
-use alloc::boxed::Box;
 use alloc::string::ToString;
-use core::ffi::{CStr, c_void};
+use core::ffi::CStr;
 use core::ptr;
 use core::sync::atomic::Ordering;
 
 use ffi::win32::event::{WindowsEvent, WindowsEventData};
 use ffi::{Metric, StaticCommandName, Violation};
-use wdk_sys::_WORK_QUEUE_TYPE::DelayedWorkQueue;
-use wdk_sys::ntddk::{
-    IoAllocateWorkItem, IoFreeWorkItem, IoQueueWorkItem, KeQueryPerformanceCounter,
-};
-use wdk_sys::{HANDLE, PDEVICE_OBJECT, PIO_WORKITEM};
+use wdk_sys::ntddk::KeQueryPerformanceCounter;
+use wdk_sys::{HANDLE, PDEVICE_OBJECT};
 
 use crate::log;
 use crate::state::DRIVER_STATE;
 use crate::wrappers::bindings::PsGetProcessImageFileName;
 use crate::wrappers::safety::lookup_process_by_id;
 
-struct _WorkItemContext {
-    pub event: WindowsEvent,
-    pub work: PIO_WORKITEM,
-}
-
-impl Drop for _WorkItemContext {
-    fn drop(&mut self) {
-        if !self.work.is_null() {
-            unsafe {
-                IoFreeWorkItem(self.work);
-            }
-        }
-    }
-}
-
-unsafe extern "C" fn _send_to_userspace(_: PDEVICE_OBJECT, context: *mut c_void) {
-    let context = unsafe { Box::from_raw(context as *mut _WorkItemContext) };
-    let shared_memory = DRIVER_STATE.shared_memory.load(Ordering::Acquire);
-
-    if let Some(shared_memory) = unsafe { shared_memory.as_ref() } {
-        match postcard::to_allocvec_cobs(&context.event) {
-            Ok(data) => {
-                if let Err(e) = shared_memory.queue.send(&data) {
-                    log!("Failed to write data to shared memory queue: {e}");
-                } else {
-                    shared_memory.event.set();
-                }
-            }
-            Err(e) => {
-                log!("Failed to serialize {:?}: {e}", context.event);
-            }
-        }
-    }
-}
-
 /// # Safety
 /// This callback is typically executed at DISPATCH_LEVEL
-pub unsafe extern "C" fn wfp_callback(device: PDEVICE_OBJECT, pid: u64, size: usize) {
+pub unsafe extern "C" fn wfp_callback(_: PDEVICE_OBJECT, pid: u64, size: usize) {
     let pid = match u32::try_from(pid) {
         Ok(p) => p,
         Err(_) => return,
@@ -63,10 +24,12 @@ pub unsafe extern "C" fn wfp_callback(device: PDEVICE_OBJECT, pid: u64, size: us
     let thresholds = DRIVER_STATE.thresholds.load(Ordering::Acquire);
     let ticks_per_ms = DRIVER_STATE.ticks_per_ms.load(Ordering::Acquire);
     let network_io = DRIVER_STATE.network_io.load(Ordering::Acquire);
+    let shared_memory = DRIVER_STATE.shared_memory.load(Ordering::Acquire);
 
     if let Some(thresholds) = unsafe { thresholds.as_ref() }
         && ticks_per_ms > 0
         && let Some(network_io) = unsafe { network_io.as_ref() }
+        && let Some(shared_memory) = unsafe { shared_memory.as_ref() }
     {
         let process = match lookup_process_by_id(pid as HANDLE) {
             Some(process) => process,
@@ -104,29 +67,28 @@ pub unsafe extern "C" fn wfp_callback(device: PDEVICE_OBJECT, pid: u64, size: us
 
                             let rate = 1000 * accumulated / u128::from(dt);
                             if rate >= u128::from(threshold) {
-                                let work = unsafe { IoAllocateWorkItem(device) };
+                                let event = WindowsEvent {
+                                    pid,
+                                    name: name.to_string(),
+                                    data: WindowsEventData::Violation(Violation {
+                                        metric: Metric::Network,
+                                        value: rate as u32,
+                                        threshold,
+                                    }),
+                                };
 
-                                if !work.is_null() {
-                                    let context = Box::new(_WorkItemContext {
-                                        event: WindowsEvent {
-                                            pid,
-                                            name: name.to_string(),
-                                            data: WindowsEventData::Violation(Violation {
-                                                metric: Metric::Network,
-                                                value: rate as u32,
-                                                threshold,
-                                            }),
-                                        },
-                                        work,
-                                    });
-
-                                    unsafe {
-                                        IoQueueWorkItem(
-                                            work,
-                                            Some(_send_to_userspace),
-                                            DelayedWorkQueue,
-                                            Box::into_raw(context) as *mut c_void,
-                                        );
+                                match postcard::to_allocvec_cobs(&event) {
+                                    Ok(data) => {
+                                        if let Err(e) = shared_memory.queue.send(&data) {
+                                            log!(
+                                                "Failed to write data to shared memory queue: {e}"
+                                            );
+                                        } else {
+                                            shared_memory.event.set();
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log!("Failed to serialize {event:?}: {e}");
                                     }
                                 }
                             }
