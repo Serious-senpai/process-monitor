@@ -5,9 +5,9 @@ Demonstrating Rust in Windows and Linux kernel-space
 
 ### CTA - Process Monitor Agent
 CTA monitors resource usage of processes based on configuration. It uses:
-- **Kernel tracer** (eBPF on Linux, ETW on Windows) for efficient disk and network I/O monitoring
-- **OS APIs** for CPU and memory monitoring (GetProcessTimes/GetProcessMemoryInfo on Windows, /proc/pid/stat on Linux)
-- **Persistent storage** for configuration (Registry on Windows, config file on Linux)
+- **Kernel tracer** (eBPF on Linux, minifilter + WFP callout driver on Windows) for efficient disk and network I/O monitoring.
+- **OS APIs** for CPU and memory monitoring (`GetProcessTimes`/`GetProcessMemoryInfo` on Windows, `/proc/pid/stat` on Linux).
+- **Persistent storage** for configuration (Registry on Windows, config file on Linux).
 
 Features:
 - Receives configuration from CTB via TCP
@@ -46,10 +46,10 @@ Features:
 
 Fields:
 - `process`: Process name to monitor
-- `cpu`: CPU threshold in percent (0-100), **0 = disabled**
-- `memory`: Memory threshold in MB, **0 = disabled**
-- `disk`: Disk I/O threshold in MB/s, **0 = disabled**
-- `network`: Network I/O threshold in KB/s, **0 = disabled**
+- `cpu`: CPU threshold in percent (0-100).
+- `memory`: Memory threshold in MB.
+- `disk`: Disk I/O threshold in MB/s.
+- `network`: Network I/O threshold in KB/s.
 
 **Note:** Setting a threshold to 0 disables monitoring for that resource type. To catch any usage, set the threshold to 1 (or another minimal value).
 
