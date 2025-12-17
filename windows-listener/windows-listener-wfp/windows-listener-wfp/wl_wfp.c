@@ -1,4 +1,7 @@
 // WFP layer identifiers: https://learn.microsoft.com/en-us/windows/win32/fwp/management-filtering-layer-identifiers-
+// Available metadata at each layer: https://learn.microsoft.com/en-us/windows-hardware/drivers/network/metadata-fields-at-each-filtering-layer
+// TCP packet flow: https://learn.microsoft.com/en-us/windows/win32/fwp/tcp-packet-flows
+// UDP packet flow: https://learn.microsoft.com/en-us/windows/win32/fwp/udp-packet-flows
 
 #include "wl_wfp.h"
 
@@ -36,6 +39,8 @@ DEFINE_GUID(
 
 DEFINE_GUID(WINDOWS_LISTENER_GUID_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
+typedef void (*_WFPCallback)(PDEVICE_OBJECT device, UINT64 pid, WCHAR *process_name, SIZE_T size);
+
 typedef struct _FlowContext
 {
     // Entry in the global linked list
@@ -52,6 +57,7 @@ typedef struct _FlowContext
 
     struct _WFPTracer *tracer;
     UINT64 pid;
+    WCHAR process_name[16];
 } FlowContext;
 
 typedef struct _RegisteredCallout
@@ -73,7 +79,7 @@ typedef struct _WFPTracer
     EX_SPIN_LOCK unloading_lock;
     PDEVICE_OBJECT device;
 
-    void (*callback)(PDEVICE_OBJECT device, UINT64 pid, SIZE_T size);
+    _WFPCallback callback;
 } WFPTracer;
 
 static NTSTATUS _register_callout(
@@ -208,6 +214,33 @@ static BOOL _unregister_callout(IN OUT WFPTracer *tracer, IN OUT RegisteredCallo
     return success;
 }
 
+static void get_filename_from_process_path(const FWP_BYTE_BLOB *process_path, WCHAR result[16])
+{
+    WCHAR *src = (WCHAR *)process_path->data;
+    SIZE_T len = process_path->size / sizeof(WCHAR);
+    RtlZeroMemory(result, 16);
+
+    if (len == 0)
+    {
+        return;
+    }
+
+    SIZE_T offset;
+    for (offset = len - 1; offset > 0; offset--)
+    {
+        if (src[offset] == L'\\' || src[offset] == L'/')
+        {
+            offset++;
+            break;
+        }
+    }
+
+    for (SIZE_T i = 0; i < 15 && offset + i < len; i++)
+    {
+        result[i] = src[offset + i];
+    }
+}
+
 static void NTAPI _ale_classify(
     IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
     IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
@@ -225,6 +258,7 @@ static void NTAPI _ale_classify(
     if (!tracer->unloading &&
         in_fixed_values != NULL &&
         in_meta_values != NULL &&
+        FWPS_IS_METADATA_FIELD_PRESENT(in_meta_values, FWPS_METADATA_FIELD_PROCESS_PATH) &&
         FWPS_IS_METADATA_FIELD_PRESENT(in_meta_values, FWPS_METADATA_FIELD_PROCESS_ID) &&
         FWPS_IS_METADATA_FIELD_PRESENT(in_meta_values, FWPS_METADATA_FIELD_FLOW_HANDLE) &&
         flow_context == 0)
@@ -281,6 +315,7 @@ static void NTAPI _ale_classify(
             ctx->callout_id = next->fwps_callout_id;
             ctx->tracer = tracer;
             ctx->pid = pid;
+            get_filename_from_process_path(in_meta_values->processPath, ctx->process_name);
 
             // In order to use `FwpsFlowAssociateContext0`, we need to define a `flow_delete` function
             // below (even a dummy one works), or else this call will return `STATUS_INVALID_PARAMETER`.
@@ -329,7 +364,7 @@ static void NTAPI _tcp_classify(
         {
             const FWPS_STREAM_CALLOUT_IO_PACKET0 *data = (const FWPS_STREAM_CALLOUT_IO_PACKET0 *)layer_data;
             const FWPS_STREAM_DATA0 *stream = data->streamData;
-            tracer->callback(tracer->device, pid, stream->dataLength);
+            tracer->callback(tracer->device, pid, ctx->process_name, stream->dataLength);
         }
     }
 
@@ -369,7 +404,7 @@ static void NTAPI _udp_classify(
                 }
             }
 
-            tracer->callback(tracer->device, pid, total);
+            tracer->callback(tracer->device, pid, ctx->process_name, total);
         }
     }
 
@@ -526,14 +561,15 @@ void free_wfp_tracer(WFPTracerHandle tracer)
     ExFreePool(tracer);
 }
 
-static void _dummy_callback(PDEVICE_OBJECT device, UINT64 pid, SIZE_T size)
+static void _dummy_callback(PDEVICE_OBJECT device, UINT64 pid, WCHAR *process_name, SIZE_T size)
 {
     UNREFERENCED_PARAMETER(device);
     UNREFERENCED_PARAMETER(pid);
+    UNREFERENCED_PARAMETER(process_name);
     UNREFERENCED_PARAMETER(size);
 }
 
-WFPTracerHandle new_wfp_tracer(PDEVICE_OBJECT device, void (*callback)(PDEVICE_OBJECT device, UINT64 pid, SIZE_T size))
+WFPTracerHandle new_wfp_tracer(PDEVICE_OBJECT device, _WFPCallback callback)
 {
     LOG("Initializing new WFP tracer");
     WFPTracer *tracer = ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(WFPTracer), POOL_TAG);

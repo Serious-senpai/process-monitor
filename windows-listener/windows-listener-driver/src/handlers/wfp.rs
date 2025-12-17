@@ -1,21 +1,23 @@
-use alloc::string::ToString;
-use core::ffi::CStr;
-use core::ptr;
+use alloc::string::{String, ToString};
 use core::sync::atomic::Ordering;
+use core::{ptr, slice};
 
 use ffi::win32::event::{WindowsEvent, WindowsEventData};
-use ffi::{Metric, StaticCommandName, Violation};
+use ffi::{COMMAND_LENGTH, Metric, StaticCommandName, Violation};
 use wdk_sys::ntddk::KeQueryPerformanceCounter;
-use wdk_sys::{HANDLE, PDEVICE_OBJECT};
+use wdk_sys::{PDEVICE_OBJECT, WCHAR};
 
 use crate::log;
 use crate::state::DRIVER_STATE;
-use crate::wrappers::bindings::PsGetProcessImageFileName;
-use crate::wrappers::safety::lookup_process_by_id;
 
 /// # Safety
 /// This callback is typically executed at DISPATCH_LEVEL
-pub unsafe extern "C" fn wfp_callback(_: PDEVICE_OBJECT, pid: u64, size: usize) {
+pub unsafe extern "C" fn wfp_callback(
+    _: PDEVICE_OBJECT,
+    pid: u64,
+    process_name: *mut WCHAR,
+    size: usize,
+) {
     let pid = match u32::try_from(pid) {
         Ok(p) => p,
         Err(_) => return,
@@ -31,15 +33,14 @@ pub unsafe extern "C" fn wfp_callback(_: PDEVICE_OBJECT, pid: u64, size: usize) 
         && let Some(network_io) = unsafe { network_io.as_ref() }
         && let Some(shared_memory) = unsafe { shared_memory.as_ref() }
     {
-        let process = match lookup_process_by_id(pid as HANDLE) {
-            Some(process) => process,
-            None => return,
-        };
+        let buffer = unsafe { slice::from_raw_parts(process_name, COMMAND_LENGTH) };
+        let len = buffer
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(COMMAND_LENGTH);
 
-        if let Ok(name) =
-            unsafe { CStr::from_ptr(PsGetProcessImageFileName(*process.as_ptr())) }.to_str()
-        {
-            let static_name = StaticCommandName::from(name);
+        if let Ok(name) = String::from_utf16(&buffer[..len]) {
+            let static_name = StaticCommandName::from(name.as_str());
 
             if let Some(threshold) = {
                 let thresholds = thresholds.acquire();
