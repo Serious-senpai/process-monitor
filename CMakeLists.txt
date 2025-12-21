@@ -32,6 +32,7 @@ endif()
 
 message(STATUS "Copying ${ORIGINAL_CDYLIB} to ${COPIED_CDYLIB}")
 file(COPY_FILE "${ORIGINAL_CDYLIB}" "${COPIED_CDYLIB}")
+file(COPY_FILE "${ROOT}/scripts/monitor.json" "${CMAKE_BINARY_DIR}/monitor.json")
 
 # CTA - Process Monitor Agent
 add_executable(CTA "${ROOT}/process-monitor/src/cta.cpp" "${SOURCES}")

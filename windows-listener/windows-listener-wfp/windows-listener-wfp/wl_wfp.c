@@ -216,22 +216,22 @@ static BOOL _unregister_callout(IN OUT WFPTracer *tracer, IN OUT RegisteredCallo
 
 static void get_filename_from_process_path(const FWP_BYTE_BLOB *process_path, WCHAR result[16])
 {
-    WCHAR *src = (WCHAR *)process_path->data;
-    SIZE_T len = process_path->size / sizeof(WCHAR);
-    RtlZeroMemory(result, 16);
-
-    if (len == 0)
+    if (process_path == NULL)
     {
         return;
     }
 
-    SIZE_T offset;
-    for (offset = len - 1; offset > 0; offset--)
+    WCHAR *src = (WCHAR *)process_path->data;
+    SIZE_T len = process_path->size / sizeof(WCHAR);
+    RtlZeroMemory(result, 16 * sizeof(WCHAR));
+
+    // `offset` is the first character we copy to `result`
+    SIZE_T offset = 0;
+    for (SIZE_T i = 0; i < len; i++)
     {
-        if (src[offset] == L'\\' || src[offset] == L'/')
+        if (src[i] == L'\\' || src[i] == L'/')
         {
-            offset++;
-            break;
+            offset = i + 1;
         }
     }
 
@@ -244,7 +244,7 @@ static void get_filename_from_process_path(const FWP_BYTE_BLOB *process_path, WC
 static void NTAPI _ale_classify(
     IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
     IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
-    IN OUT void *layer_data,
+    IN OUT PVOID layer_data,
     IN const FWPS_FILTER0 *filter,
     IN UINT64 flow_context,
     IN OUT FWPS_CLASSIFY_OUT0 *classify_out)
@@ -343,7 +343,7 @@ cleanup:
 static void NTAPI _tcp_classify(
     IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
     IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
-    IN OUT void *layer_data,
+    IN OUT PVOID layer_data,
     IN const FWPS_FILTER0 *filter,
     IN UINT64 flow_context,
     IN OUT FWPS_CLASSIFY_OUT0 *classify_out)
@@ -375,7 +375,7 @@ static void NTAPI _tcp_classify(
 static void NTAPI _udp_classify(
     IN const FWPS_INCOMING_VALUES0 *in_fixed_values,
     IN const FWPS_INCOMING_METADATA_VALUES0 *in_meta_values,
-    IN OUT void *layer_data,
+    IN OUT PVOID layer_data,
     IN const FWPS_FILTER0 *filter,
     IN UINT64 flow_context,
     IN OUT FWPS_CLASSIFY_OUT0 *classify_out)

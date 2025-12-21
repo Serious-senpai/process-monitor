@@ -24,7 +24,7 @@ pub const MAX_PROCESS_COUNT: u32 = 512;
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Threshold {
-    pub thresholds: [u32; 4],
+    pub values: [u32; 4],
 }
 
 #[cfg(feature = "linux-user")]

@@ -515,3 +515,35 @@ namespace net
         return _inner.set_nonblocking(nonblocking);
     }
 }
+
+namespace std
+{
+    ostream &operator<<(ostream &os, const net::SocketAddr &addr)
+    {
+        if (addr.is_v4())
+        {
+            const auto &v4 = addr.as_v4();
+            const uint8_t *octets = v4.ip().octets();
+            os << static_cast<int>(octets[0]) << "."
+               << static_cast<int>(octets[1]) << "."
+               << static_cast<int>(octets[2]) << "."
+               << static_cast<int>(octets[3]) << ":"
+               << v4.port();
+        }
+        else
+        {
+            const auto &v6 = addr.as_v6();
+            uint16_t segments[8];
+            v6.ip().segments(segments);
+            os << "[";
+            for (int i = 0; i < 8; ++i)
+            {
+                if (i > 0)
+                    os << ":";
+                os << std::hex << segments[i];
+            }
+            os << std::dec << "]:" << v6.port();
+        }
+        return os;
+    }
+}

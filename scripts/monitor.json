@@ -1,0 +1,37 @@
+[
+    {
+        "name": "curl.exe",
+        "cpu": 0,
+        "memory": 0,
+        "disk": 0,
+        "network": 0
+    },
+    {
+        "name": "msedge.exe",
+        "cpu": 0,
+        "memory": 0,
+        "disk": 0,
+        "network": 0
+    },
+    {
+        "name": "notepad.exe",
+        "cpu": 0,
+        "memory": 0,
+        "disk": 0,
+        "network": 0
+    },
+    {
+        "name": "curl",
+        "cpu": 0,
+        "memory": 0,
+        "disk": 0,
+        "network": 0
+    },
+    {
+        "name": "firefox",
+        "cpu": 0,
+        "memory": 0,
+        "disk": 0,
+        "network": 0
+    }
+]

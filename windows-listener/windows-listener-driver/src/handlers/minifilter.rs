@@ -89,7 +89,7 @@ unsafe extern "system" fn _minifilter_postop(
                 let thresholds = thresholds.acquire();
                 thresholds
                     .get(&static_name)
-                    .map(|t| t.thresholds[Metric::Disk as usize])
+                    .map(|t| t.values[Metric::Disk as usize])
             } {
                 let pid = unsafe { PsGetProcessId(process) } as u32;
                 let timestamp_ms = (unsafe { KeQueryPerformanceCounter(ptr::null_mut()).QuadPart }

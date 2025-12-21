@@ -46,7 +46,7 @@ pub unsafe extern "C" fn wfp_callback(
                 let thresholds = thresholds.acquire();
                 thresholds
                     .get(&static_name)
-                    .map(|t| t.thresholds[Metric::Network as usize])
+                    .map(|t| t.values[Metric::Network as usize])
             } {
                 let timestamp_ms = (unsafe { KeQueryPerformanceCounter(ptr::null_mut()).QuadPart }
                     / ticks_per_ms) as u64;

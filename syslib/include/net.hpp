@@ -537,3 +537,8 @@ namespace net
         io::Result<std::monostate> set_nonblocking(bool nonblocking) const;
     };
 }
+
+namespace std
+{
+    ostream &operator<<(ostream &os, const net::SocketAddr &addr);
+}

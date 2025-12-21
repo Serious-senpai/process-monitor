@@ -1,43 +1,65 @@
-#include "net.hpp"
-
 #include "config.hpp"
+#include "fs.hpp"
+#include "net.hpp"
 #include "utils.hpp"
 
 int main(int argc, char **argv)
 {
     if (argc != 2)
     {
-        return show_help();
+        return procmon::show_help();
     }
 
-    auto port = parse_port(argv[1]);
+    auto port = procmon::parse_port(argv[1]);
     if (!port.has_value())
     {
-        return show_help();
+        return procmon::show_help();
     }
 
     Threshold sample = {0};
     std::vector<procmon::ConfigEntry> entries;
-    entries.push_back(procmon::ConfigEntry{
-        .name = "curl.exe",
-        .threshold = sample,
-    });
-    entries.push_back(procmon::ConfigEntry{
-        .name = "notepad.exe",
-        .threshold = sample,
-    });
 
-    auto listener = net::TcpListener::bind(net::SocketAddrV4(net::Ipv4Addr::LOCALHOST, port.value()));
-    auto client = listener.unwrap().accept();
-    if (client.is_ok())
+    // TODO: Better path handling
+    auto file_result = fs::File::open(path::PathBuf("monitor.json"));
+    if (file_result.is_ok())
     {
-        auto stream = std::move(client).into_ok().first;
+        auto file = std::move(file_result).into_ok();
 
-        uint8_t size = static_cast<uint8_t>(entries.size());
-        stream.write(std::span<char>(reinterpret_cast<char *>(&size), sizeof(size))).unwrap();
-        stream.write(std::span<char>(reinterpret_cast<char *>(entries.data()), sizeof(procmon::ConfigEntry) * entries.size())).unwrap();
-        stream.flush();
+        // Read file contents
+        std::vector<char> buffer(8192);
+        std::string content;
+
+        while (true)
+        {
+            auto read_result = file.read(std::span<char>(buffer.data(), buffer.size()));
+            if (read_result.is_err())
+            {
+                break;
+            }
+
+            size_t bytes_read = std::move(read_result).into_ok();
+            if (bytes_read == 0)
+            {
+                break;
+            }
+
+            content.append(buffer.data(), bytes_read);
+        }
+
+        auto listener = net::TcpListener::bind(net::SocketAddrV4(net::Ipv4Addr::LOCALHOST, port.value()));
+        if (listener.is_ok())
+        {
+            return procmon::ctb_loop(listener.unwrap(), content);
+        }
+        else
+        {
+            std::cerr << "Failed to bind to port " << port.value() << ": " << listener.unwrap_err().message() << std::endl;
+        }
+    }
+    else
+    {
+        std::cerr << "Unable to open JSON file: " << file_result.unwrap_err().message() << std::endl;
     }
 
-    return 0;
+    return 1;
 }
