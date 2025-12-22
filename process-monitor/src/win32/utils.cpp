@@ -293,9 +293,9 @@ private:
                         {
                             procmon::ConfigEntry entry = {0};
 
-                            auto process = item.value("process", "");
-                            size_t len = std::min(process.size(), COMMAND_LENGTH - 1);
-                            std::memcpy(entry.name, process.data(), len);
+                            auto name = item.value("name", "");
+                            size_t len = std::min(name.size(), COMMAND_LENGTH - 1);
+                            std::memcpy(entry.name, name.data(), len);
                             entry.name[len] = '\0';
 
                             entry.threshold.values[static_cast<int>(Metric::Cpu)] = item.value("cpu", 0);
@@ -310,6 +310,7 @@ private:
                     else
                     {
                         std::cerr << "Received corrupted data. Reconnecting." << std::endl;
+                        context->reconnect();
                         break;
                     }
                 }
@@ -406,7 +407,7 @@ public:
         auto context = std::make_unique<_CTAContext>(tracer, port, std::move(stream));
         if (context->_stream == nullptr)
         {
-            std::cerr << "Loading configuration from local machine" << std::endl;
+            std::cerr << "Loading configuration from local machine." << std::endl;
             auto load_from_local = procmon::load_config();
             if (load_from_local.is_ok())
             {
@@ -557,10 +558,19 @@ public:
     {
         std::cerr << "Sending initial configuration to " << addr << std::endl;
 
-        auto send = this->stream->write(std::span<const char>(json_config.data(), json_config.size()));
-        if (send.is_err())
+        uint32_t length = static_cast<uint32_t>(json_config.size());
+        auto send1 = this->stream->write(std::span<const char>(reinterpret_cast<const char *>(&length), sizeof(length)));
+        if (send1.is_err())
         {
-            std::cerr << "Failed to send initial configuration to client: " << send.unwrap_err().message() << std::endl;
+            std::cerr << "Failed to send initial configuration to " << addr << ": " << send1.unwrap_err().message() << std::endl;
+        }
+        else
+        {
+            auto send2 = this->stream->write(std::span<const char>(json_config.data(), json_config.size()));
+            if (send2.is_err())
+            {
+                std::cerr << "Failed to send initial configuration to " << addr << ": " << send2.unwrap_err().message() << std::endl;
+            }
         }
     }
 };
@@ -592,15 +602,20 @@ DWORD ctb_serve(LPVOID param)
     return ERROR_SUCCESS;
 }
 
+void initialize()
+{
+    if (!SetConsoleCtrlHandler(_ctrl_handler, TRUE))
+    {
+        std::cerr << "Failed to set console control handler: " << GetLastError() << std::endl;
+    }
+}
+
 namespace procmon
 {
     int cta_loop(uint16_t port)
     {
         initialize_logger(4);
-        if (!SetConsoleCtrlHandler(_ctrl_handler, TRUE))
-        {
-            std::cerr << "Failed to set console control handler: " << GetLastError() << std::endl;
-        }
+        initialize();
 
         auto context_result = _CTAContext::connect(port);
         if (context_result.is_err())
@@ -629,6 +644,7 @@ namespace procmon
 
     int ctb_loop(net::TcpListener &listener, const std::string &json_config)
     {
+        initialize();
         while (!stopped)
         {
             // FIXME: Handle Ctrl-C
