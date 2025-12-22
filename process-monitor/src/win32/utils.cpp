@@ -195,7 +195,7 @@ private:
             for (auto iter = context->_monitored_pids.begin(); iter != context->_monitored_pids.end() && !stopped;)
             {
                 auto pid = iter->first;
-                std::cerr << "Measuring CPU/memory of " << pid << std::endl;
+                // std::cerr << "Measuring CPU/memory of process " << pid << std::endl;
                 auto &metric = iter->second;
 
                 auto cpu = metric.cpu.refresh();
@@ -242,7 +242,7 @@ private:
         while (!stopped)
         {
             auto event = next_event(context->tracer(), 1000);
-            std::cerr << "Received event from tracer: " << event << std::endl;
+            // std::cerr << "Received event from tracer: " << event << std::endl;
             if (event != nullptr)
             {
                 auto pid = event->pid;
@@ -259,7 +259,7 @@ private:
                     }
                     else
                     {
-                        std::cerr << "Failed to open process " << pid << ": " << GetLastError() << std::endl;
+                        std::cerr << "Warning: Failed to open process " << pid << ": " << GetLastError() << std::endl;
                     }
                 }
                 else if (event->variant == EventType::Violation)
@@ -306,7 +306,6 @@ private:
                         }
 
                         context->set_monitor_targets(entries);
-                        procmon::save_config(entries);
                     }
                     else
                     {
@@ -332,7 +331,7 @@ private:
 
     void _populate_initial_processes(const std::vector<const char *> &targets)
     {
-        std::cerr << "Populating initial processes" << std::endl;
+        // std::cerr << "Populating initial processes" << std::endl;
         _CriticalSectionGuard guard(&_monitored_pids_cs);
         auto processes = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (processes != INVALID_HANDLE_VALUE)
@@ -374,7 +373,7 @@ private:
             CloseHandle(processes);
         }
 
-        std::cerr << "Done iterating all existing processes" << std::endl;
+        // std::cerr << "Done iterating all existing processes" << std::endl;
     }
 
 public:
@@ -416,7 +415,7 @@ public:
             }
             else
             {
-                std::cerr << "Failed to load configuration from local machine: " << load_from_local.unwrap_err().message() << std::endl;
+                std::cerr << "Warning: Failed to load configuration from local machine: " << load_from_local.unwrap_err().message() << std::endl;
             }
         }
 
@@ -480,7 +479,7 @@ public:
     void push_violation(procmon::ViolationInfo &&info)
     {
         _CriticalSectionGuard guard(&_queue_cs);
-        std::cerr << "Pushing violation for PID " << info.pid << std::endl;
+        // std::cerr << "Pushing violation for PID " << info.pid << std::endl;
         _queue.push_back(std::move(info));
         WakeConditionVariable(&_queue_cv);
     }
@@ -521,6 +520,7 @@ public:
             targets.push_back(target);
         }
 
+        procmon::save_config(entries);
         _populate_initial_processes(targets);
     }
 
@@ -557,7 +557,7 @@ public:
     {
         std::cerr << "Sending initial configuration to " << addr << std::endl;
 
-        auto send = stream->write(std::span<const char>(json_config.data(), json_config.size()));
+        auto send = this->stream->write(std::span<const char>(json_config.data(), json_config.size()));
         if (send.is_err())
         {
             std::cerr << "Failed to send initial configuration to client: " << send.unwrap_err().message() << std::endl;
