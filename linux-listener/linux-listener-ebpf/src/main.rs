@@ -83,7 +83,7 @@ fn _update_io_usage<T: EbpfContext>(
             let name = StaticCommandName(name);
             if let Some(threshold) = unsafe { NAMES.get(&name) } {
                 let pid = ctx.pid();
-                let threshold = threshold.thresholds[metric as usize];
+                let threshold = threshold.values[metric as usize];
                 let timestamp_ms = unsafe { bpf_ktime_get_ns() / 1_000_000 } & 0xFFFFFFFF;
 
                 match map.get_ptr_mut(&(name, pid)) {
