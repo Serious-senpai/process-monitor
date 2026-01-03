@@ -68,18 +68,17 @@ pub fn driver_entry(
     let device_name = UnicodeString::try_from(DEVICE_NAME)?;
 
     let mut device = ptr::null_mut();
-    let status = unsafe {
-        let mut device_name = device_name.native().into_inner();
+    let status = device_name.with_cloned_native(|s| unsafe {
         IoCreateDevice(
             guard.driver,
             0,
-            &mut device_name,
+            s,
             FILE_DEVICE_UNKNOWN,
             FILE_DEVICE_SECURE_OPEN,
             0,
             &mut device,
         )
-    };
+    })?;
     if !nt_success(status) {
         log!("Failed to create device: {status}");
         return Err(RuntimeError::Failure(status));

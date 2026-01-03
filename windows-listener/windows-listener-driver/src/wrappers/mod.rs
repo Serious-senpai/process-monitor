@@ -1,8 +1,8 @@
 pub mod bindings;
+pub mod event;
 pub mod irql;
 pub mod lock;
-pub mod phantom;
+pub mod object;
 pub mod safety;
 pub mod strings;
-pub mod user_object;
 pub mod wfp;

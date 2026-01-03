@@ -13,34 +13,44 @@ use ffi::win32::mpsc::{DEFAULT_CHANNEL_SIZE, DefaultChannel};
 use ffi::{Event, StaticCommandName, Threshold};
 use log::{LevelFilter, error};
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
-use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Memory::{
-    CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
-    PAGE_READWRITE, UnmapViewOfFile,
+    FILE_MAP_READ, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, OpenFileMappingW,
+    UnmapViewOfFile,
 };
-use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+use windows::Win32::System::Threading::{
+    EVENT_MODIFY_STATE, OpenEventW, SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject,
+};
 use windows::core::PCWSTR;
 
-#[derive(Debug)]
-struct _MappedMemoryGuard(MEMORY_MAPPED_VIEW_ADDRESS);
-
-impl Drop for _MappedMemoryGuard {
+struct _KernelTracer {
+    pub device: HANDLE,
+    pub section: HANDLE,
+    pub base_address: MEMORY_MAPPED_VIEW_ADDRESS,
+    pub event: HANDLE,
+    pub reading: Mutex<VecDeque<u8>>,
+}
+impl Drop for _KernelTracer {
     fn drop(&mut self) {
-        if !self.0.Value.is_null() {
-            unsafe {
-                let _ = UnmapViewOfFile(self.0);
+        unsafe {
+            if self.event != HANDLE::default() {
+                let _ = CloseHandle(self.event);
+            }
+
+            if !self.base_address.Value.is_null() {
+                let _ = UnmapViewOfFile(self.base_address);
+            }
+
+            if self.section != HANDLE::default() {
+                let _ = CloseHandle(self.section);
+            }
+
+            if self.device != HANDLE::default() {
+                let _ = CloseHandle(self.device);
             }
         }
     }
-}
-
-struct _KernelTracer {
-    pub _hmap: HANDLE, // Keep this handle so it doesn't get closed
-    pub base: _MappedMemoryGuard,
-    pub device: HANDLE,
-    pub event: HANDLE,
-    pub reading: Mutex<VecDeque<u8>>,
 }
 
 pub struct KernelTracerHandle {
@@ -93,66 +103,33 @@ pub unsafe extern "C" fn initialize_logger(level: c_int) -> c_int {
 /// This function is just marked as `unsafe` because it is exposed via `extern "C"`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
-    const CHANNEL_SIZE: usize = size_of::<DefaultChannel>();
-    let channel_size_u32 = match u32::try_from(CHANNEL_SIZE) {
-        Ok(size) => size,
-        Err(e) => {
-            error!("DefaultChannel size is too large: {e}");
-            return ptr::null_mut();
-        }
-    };
-
-    let hmap = match unsafe {
-        CreateFileMappingW(
-            INVALID_HANDLE_VALUE,
-            None,
-            PAGE_READWRITE,
-            0,
-            channel_size_u32,
-            PCWSTR::from_raw(ptr::null()),
-        )
-    } {
-        Ok(hmap) => hmap,
-        Err(e) => {
-            error!("CreateFileMappingW failed: {e}");
-            return ptr::null_mut();
-        }
-    };
-
-    // `HANDLE` already has a `Drop` impl that calls `CloseHandle`. I do not really like this implicit behavior though.
-    let base = unsafe { MapViewOfFile(hmap, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, CHANNEL_SIZE) };
-
-    if base.Value.is_null() {
-        error!("MapViewOfFile failed: {}", io::Error::last_os_error());
-        return ptr::null_mut();
-    }
-
-    let base = _MappedMemoryGuard(base);
-    let event = match unsafe { CreateEventW(None, false, false, PCWSTR::from_raw(ptr::null())) } {
-        Ok(event) => event,
-        Err(e) => {
-            error!("CreateEventW failed: {e}");
-            return ptr::null_mut();
-        }
-    };
-
     match OpenOptions::new().read(true).write(true).open(DEVICE_NAME) {
         Ok(file) => {
-            let device = HANDLE(file.into_raw_handle());
-            let message = MemoryInitialize {
-                mapping: hmap.0,
-                event: event.0,
+            let mut result = _KernelTracer {
+                device: HANDLE(file.into_raw_handle()),
+                section: HANDLE::default(),
+                base_address: MEMORY_MAPPED_VIEW_ADDRESS {
+                    Value: ptr::null_mut(),
+                },
+                event: HANDLE::default(),
+                reading: Mutex::new(VecDeque::new()),
+            };
+            let mut initialize = MemoryInitialize {
+                section: [0; 64],
+                event: [0; 64],
+                size: 0,
             };
 
+            let mut bytes = 0;
             if let Err(e) = unsafe {
                 DeviceIoControl(
-                    device,
+                    result.device,
                     IOCTL_MEMORY_INITIALIZE,
-                    Some(&message as *const _ as *const c_void),
-                    size_of::<MemoryInitialize>() as _,
                     None,
                     0,
-                    None,
+                    Some(&mut initialize as *mut _ as *mut c_void),
+                    size_of::<MemoryInitialize>() as _,
+                    Some(&mut bytes),
                     None,
                 )
             } {
@@ -160,14 +137,49 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
                 return ptr::null_mut();
             }
 
-            let tracer = Box::new(_KernelTracer {
-                _hmap: hmap,
-                base,
-                device,
-                event,
-                reading: Mutex::new(VecDeque::new()),
-            });
-            Box::into_raw(tracer) as *mut KernelTracerHandle
+            match unsafe {
+                OpenFileMappingW(
+                    (FILE_MAP_READ | FILE_MAP_WRITE).0,
+                    false,
+                    PCWSTR::from_raw(initialize.section.as_ptr()),
+                )
+            } {
+                Ok(h) => result.section = h,
+                Err(e) => {
+                    error!("Failed to open file mapping: {e}");
+                    return ptr::null_mut();
+                }
+            }
+
+            result.base_address = unsafe {
+                MapViewOfFile(
+                    result.section,
+                    FILE_MAP_READ | FILE_MAP_WRITE,
+                    0,
+                    0,
+                    size_of::<DefaultChannel>(),
+                )
+            };
+            if result.base_address.Value.is_null() {
+                error!("Failed to map view of file: {}", io::Error::last_os_error());
+                return ptr::null_mut();
+            }
+
+            match unsafe {
+                OpenEventW(
+                    EVENT_MODIFY_STATE | SYNCHRONIZATION_SYNCHRONIZE,
+                    false,
+                    PCWSTR::from_raw(initialize.event.as_ptr()),
+                )
+            } {
+                Ok(h) => result.event = h,
+                Err(e) => {
+                    error!("Failed to open event: {e}");
+                    return ptr::null_mut();
+                }
+            }
+
+            Box::into_raw(Box::new(result)) as *mut KernelTracerHandle
         }
         Err(e) => {
             error!("Failed to open device {DEVICE_NAME:?}: {e}");
@@ -184,7 +196,9 @@ pub unsafe extern "C" fn new_tracer() -> *mut KernelTracerHandle {
 pub unsafe extern "C" fn free_tracer(tracer: *mut KernelTracerHandle) {
     let tracer = tracer as *mut _KernelTracer;
     if !tracer.is_null() {
-        drop(unsafe { Box::from_raw(tracer) });
+        unsafe {
+            drop(Box::from_raw(tracer));
+        }
     }
 }
 
@@ -306,7 +320,7 @@ pub unsafe extern "C" fn next_event(
                             return ptr::null_mut();
                         }
 
-                        let channel = tracer.base.0.Value as *const DefaultChannel;
+                        let channel = tracer.base_address.Value as *const DefaultChannel;
                         let channel = unsafe { &*channel };
 
                         let size = unsafe {

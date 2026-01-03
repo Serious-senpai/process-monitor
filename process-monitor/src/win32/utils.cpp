@@ -16,10 +16,12 @@ BOOL WINAPI _ctrl_handler(DWORD ctrl_type)
 {
     if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT)
     {
-        std::cout << "\nShutting down..." << std::endl;
+        std::cerr << "\nShutting down..." << std::endl;
         stopped = true;
+        SetConsoleCtrlHandler(_ctrl_handler, FALSE);
         return TRUE;
     }
+
     return FALSE;
 }
 
@@ -400,6 +402,7 @@ public:
             return io::Result<std::unique_ptr<_CTAContext>>::err(io::Error::other("Failed to create kernel tracer"));
         }
 
+        std::cerr << "Connecting to port " << port << std::endl;
         auto connect = net::TcpStream::connect(net::SocketAddrV4(net::Ipv4Addr::LOCALHOST, port));
         auto stream = connect.is_ok()
                           ? std::make_unique<net::TcpStream>(std::move(connect).into_ok())
@@ -632,7 +635,7 @@ namespace procmon
             if (event.has_value())
             {
                 auto &violation = event.value();
-                if (context->write_message(std::span<const char>(reinterpret_cast<const char *>(&violation), sizeof(violation))).is_err())
+                while (context->write_message(std::span<const char>(reinterpret_cast<const char *>(&violation), sizeof(violation))).is_err())
                 {
                     context->reconnect();
                 }

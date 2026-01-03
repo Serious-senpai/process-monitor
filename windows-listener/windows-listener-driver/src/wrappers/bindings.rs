@@ -5,7 +5,8 @@ use wdk_sys::_MEMORY_CACHING_TYPE::MmCached;
 use wdk_sys::_MODE::KernelMode;
 use wdk_sys::ntddk::MmMapLockedPagesSpecifyCache;
 use wdk_sys::{
-    MDL, MDL_MAPPED_TO_SYSTEM_VA, MDL_SOURCE_IS_NONPAGED_POOL, PEPROCESS, PIO_STACK_LOCATION, PIRP,
+    HANDLE, MDL, MDL_MAPPED_TO_SYSTEM_VA, MDL_SOURCE_IS_NONPAGED_POOL, OBJECT_ATTRIBUTES,
+    PEPROCESS, PIO_STACK_LOCATION, PIRP, POBJECT_ATTRIBUTES, PSECURITY_DESCRIPTOR, PUNICODE_STRING,
     ULONG,
 };
 
@@ -29,8 +30,8 @@ pub unsafe fn IoGetCurrentIrpStackLocation(irp: PIRP) -> PIO_STACK_LOCATION {
     }
 }
 
-#[allow(non_snake_case)]
 /// Binding to [`MmGetSystemAddressForMdlSafe`](https://codemachine.com/downloads/win71/wdm.h)
+#[allow(non_snake_case)]
 pub unsafe fn MmGetSystemAddressForMdlSafe(mdl: *mut MDL, priority: ULONG) -> *mut c_void {
     unsafe {
         if (*mdl).MdlFlags as u32 & (MDL_MAPPED_TO_SYSTEM_VA | MDL_SOURCE_IS_NONPAGED_POOL) != 0 {
@@ -46,4 +47,27 @@ pub unsafe fn MmGetSystemAddressForMdlSafe(mdl: *mut MDL, priority: ULONG) -> *m
             )
         }
     }
+}
+
+#[allow(non_snake_case)]
+pub unsafe fn InitializeObjectAttributes(
+    p: POBJECT_ATTRIBUTES,
+    n: PUNICODE_STRING,
+    a: ULONG,
+    r: HANDLE,
+    s: PSECURITY_DESCRIPTOR,
+) {
+    unsafe {
+        (*p).Length = size_of::<OBJECT_ATTRIBUTES>() as u32;
+        (*p).RootDirectory = r;
+        (*p).Attributes = a;
+        (*p).ObjectName = n;
+        (*p).SecurityDescriptor = s;
+        (*p).SecurityQualityOfService = ptr::null_mut();
+    }
+}
+
+#[allow(non_snake_case)]
+pub const fn ZwCurrentProcess() -> HANDLE {
+    usize::MAX as HANDLE
 }

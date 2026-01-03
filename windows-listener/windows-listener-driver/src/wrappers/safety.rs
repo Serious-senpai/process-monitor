@@ -18,12 +18,7 @@ use crate::wrappers::strings::UnicodeString;
 pub fn delete_symbolic_link(name: &UnicodeString) -> Result<(), RuntimeError> {
     irql_requires(PASSIVE_LEVEL)?;
 
-    let status = unsafe {
-        let mut value = name.native().into_inner();
-
-        // This implementation relies on the fact that `IoDeleteSymbolicLink` does not modify the string
-        IoDeleteSymbolicLink(&mut value)
-    };
+    let status = name.with_cloned_native(|s| unsafe { IoDeleteSymbolicLink(s) })?;
     if !nt_success(status) {
         return Err(RuntimeError::Failure(status));
     }
@@ -40,13 +35,10 @@ pub fn create_symbolic_link(
 ) -> Result<(), RuntimeError> {
     irql_requires(PASSIVE_LEVEL)?;
 
-    let status = unsafe {
-        let mut sym_name = symbolic_link_name.native().into_inner();
-        let mut dev_name = device_name.native().into_inner();
-
-        // This implementation relies on the fact that `IoCreateSymbolicLink` does not modify the string
-        IoCreateSymbolicLink(&mut sym_name, &mut dev_name)
-    };
+    let status = symbolic_link_name.with_cloned_native(|sym_name| {
+        device_name
+            .with_cloned_native(|dev_name| unsafe { IoCreateSymbolicLink(sym_name, dev_name) })
+    })??;
     if !nt_success(status) {
         return Err(RuntimeError::Failure(status));
     }

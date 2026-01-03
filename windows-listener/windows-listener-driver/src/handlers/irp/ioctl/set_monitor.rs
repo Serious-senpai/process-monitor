@@ -50,6 +50,7 @@ impl<'a> IoctlHandler<'a> for SetMonitorHandler<'a> {
             t.insert(input.name, input.threshold);
         }
 
+        self._irp.IoStatus.Information = 0;
         Ok(())
     }
 }

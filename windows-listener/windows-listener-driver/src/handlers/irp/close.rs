@@ -36,7 +36,9 @@ impl<'a> IrpHandler<'a> for CloseHandler<'a> {
             .shared_memory
             .swap(ptr::null_mut(), Ordering::AcqRel);
         if !old.is_null() {
-            drop(unsafe { Box::from_raw(old) });
+            unsafe {
+                drop(Box::from_raw(old));
+            }
         }
 
         Ok(())

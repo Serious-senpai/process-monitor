@@ -1,4 +1,4 @@
-use wdk_sys::{FILE_ANY_ACCESS, FILE_DEVICE_UNKNOWN, HANDLE, METHOD_BUFFERED};
+use wdk_sys::{FILE_ANY_ACCESS, FILE_DEVICE_UNKNOWN, METHOD_BUFFERED, WCHAR};
 
 use crate::{StaticCommandName, Threshold};
 
@@ -17,17 +17,20 @@ pub const IOCTL_SET_MONITOR: u32 =
     _ctl_code(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS);
 
 /// Message structure to be sent during [`IOCTL_MEMORY_INITIALIZE`]
+#[derive(Debug)]
 pub struct MemoryInitialize {
-    /// Handle to the mapping object obtained via
-    /// [`CreateFileMappingW`](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-createfilemappingw)
-    pub mapping: HANDLE,
+    /// Name of the section created via `ZwCreateSection`
+    pub section: [WCHAR; 64],
 
-    /// Handle to the event object obtained via
-    /// [`CreateEventW`](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createeventw)
-    pub event: HANDLE,
+    /// Name of the event created via `ZwCreateEvent`
+    pub event: [WCHAR; 64],
+
+    /// Size of `section` in bytes
+    pub size: usize,
 }
 
 /// Message structure to be sent during [`IOCTL_SET_MONITOR`]
+#[derive(Debug)]
 pub struct SetMonitor {
     /// Name of the process to be monitored
     pub name: StaticCommandName,
