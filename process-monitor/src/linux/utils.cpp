@@ -23,14 +23,13 @@
 #include <vector>
 #include <mutex>
 
-#include <sys/types.h>
 #include <unistd.h>
-
+#include <sys/types.h>
 #include <nlohmann/json.hpp>
 
+#include "io.hpp"
 #include "utils.hpp"
 #include "generated/listener.hpp"
-#include "io.hpp"
 
 using json = nlohmann::json;
 
@@ -167,8 +166,8 @@ namespace
             _last_cpu_ms = cpu_ms;
             _last_wall_ms = now_ms;
 
-            // CPU usage scaled as percent * 100 (two decimals)
-            return delta_wall == 0 ? 0 : (delta_cpu * 10000) / delta_wall;
+            // CPU usage scaled as percent * 1000 (3 decimals)
+            return delta_wall == 0 ? 0 : (delta_cpu * 100000) / delta_wall;
         }
     };
 
