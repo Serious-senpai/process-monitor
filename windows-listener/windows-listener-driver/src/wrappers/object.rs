@@ -2,18 +2,17 @@ use core::ffi::c_void;
 use core::ptr;
 
 use wdk::nt_success;
-use wdk_sys::_MODE::UserMode;
 use wdk_sys::ntddk::{KeSetEvent, ObReferenceObjectByHandle, ObfDereferenceObject};
 use wdk_sys::{_OBJECT_TYPE, EVENT_MODIFY_STATE, HANDLE, SYNCHRONIZE};
 
 use crate::error::RuntimeError;
 
-pub struct UserObjectMap {
+pub struct KernelObject {
     _object: *mut c_void,
 }
 
-impl UserObjectMap {
-    pub fn from_userspace(
+impl KernelObject {
+    pub fn from_handle(
         handle: HANDLE,
         desired_access: u32,
         object_type: *mut _OBJECT_TYPE,
@@ -42,7 +41,7 @@ impl UserObjectMap {
     }
 }
 
-impl Drop for UserObjectMap {
+impl Drop for KernelObject {
     fn drop(&mut self) {
         unsafe {
             ObfDereferenceObject(self._object);
@@ -50,17 +49,17 @@ impl Drop for UserObjectMap {
     }
 }
 
-pub struct UserEventObject {
-    _object: UserObjectMap,
+pub struct KernelEvent {
+    _object: KernelObject,
 }
 
-impl UserEventObject {
-    pub fn from_userspace(handle: HANDLE) -> Result<Self, RuntimeError> {
-        let object = UserObjectMap::from_userspace(
+impl KernelEvent {
+    pub fn from_handle(handle: HANDLE, access_mode: i32) -> Result<Self, RuntimeError> {
+        let object = KernelObject::from_handle(
             handle,
             EVENT_MODIFY_STATE | SYNCHRONIZE,
             ptr::null_mut(),
-            UserMode.try_into()?,
+            access_mode.try_into()?,
         )?;
 
         Ok(Self { _object: object })

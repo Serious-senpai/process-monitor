@@ -446,9 +446,7 @@ namespace _net_impl
 
     io::Result<size_t> NativeTcpStream::write(std::span<const char> buffer) const
     {
-        std::cerr << "Sending to socket " << _socket << ": " << buffer.size() << " bytes" << std::endl;
         int result = send(_socket, buffer.data(), static_cast<int>(buffer.size()), 0);
-        std::cerr << "result = " << result << std::endl;
         if (result == SOCKET_ERROR)
         {
             return io::Result<size_t>::err(io::Error::last_os_error());

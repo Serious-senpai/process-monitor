@@ -38,6 +38,7 @@ impl<'a> IoctlHandler<'a> for ClearMonitorHandler<'a> {
             t.clear();
         }
 
+        self._irp.IoStatus.Information = 0;
         Ok(())
     }
 }

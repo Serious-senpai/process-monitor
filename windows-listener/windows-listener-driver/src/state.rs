@@ -6,14 +6,28 @@ use ffi::{StaticCommandName, Threshold};
 use lru::LruCache;
 use wdk_sys::DRIVER_OBJECT;
 
-use crate::mpsc::UserChannelMap;
+use crate::error::RuntimeError;
+use crate::mpsc::SharedMemorySection;
+use crate::wrappers::event::Event;
 use crate::wrappers::lock::SpinLock;
-use crate::wrappers::user_object::UserEventObject;
+use crate::wrappers::object::KernelEvent;
 use crate::wrappers::wfp::WFPTracer;
 
 pub struct SharedMemory {
-    pub queue: UserChannelMap,
-    pub event: UserEventObject,
+    _keep_alive: Event,
+    pub queue: SharedMemorySection,
+    pub event: KernelEvent,
+}
+
+impl SharedMemory {
+    pub fn new(queue: SharedMemorySection, keep_alive: Event) -> Result<Self, RuntimeError> {
+        let event = keep_alive.get_object()?;
+        Ok(Self {
+            _keep_alive: keep_alive,
+            queue,
+            event,
+        })
+    }
 }
 
 pub struct DriverState {
