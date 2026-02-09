@@ -1,0 +1,49 @@
+;
+; irp-hook.inf - Legacy / Primitive Kernel Driver
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+DriverVer   = 02/09/2026,1.0.0.0
+CatalogFile = irp-hook.cat
+PnpLockdown = 1
+
+[DestinationDirs]
+DriverCopyFiles = 12   ; %SystemRoot%\System32\drivers
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+irp-hook.sys = 1
+
+; ================= INSTALL (Architecture Decorated) =================
+
+[DefaultInstall.NTamd64]
+CopyFiles = DriverCopyFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService = irp-hook, 0x00000002, ServiceInstall
+
+; ================= FILE COPY =================
+
+[DriverCopyFiles]
+irp-hook.sys
+
+; ================= SERVICE =================
+
+[ServiceInstall]
+DisplayName    = "IRP Hook Driver"
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 3                  ; SERVICE_DEMAND_START
+ErrorControl   = 1                  ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\irp-hook.sys
+
+; ================= STRINGS =================
+
+[Strings]
+ManufacturerName = "Your Name"
+DiskName         = "IRP Hook Driver Disk"
